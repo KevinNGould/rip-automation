@@ -1,0 +1,23 @@
+# Secrets and per-machine config: never commit
+config/machine.json
+config/secrets.json
+config.json
+trial/config.json
+*.env
+.env*
+
+# Runtime state, logs, downloads
+state/
+processed.json
+*.log
+rip_log.txt
+potry_controls*.txt
+*.png
+*.part
+*.prn
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
