@@ -1,17 +1,12 @@
 {
-  "machine_id": "8color",
-  "label": "8-Color DTF",
-  "enabled": true,
-  "product_rules": [
-    {"title_contains": "DTF Color-Pro (8 Color CMYK+RGBO)", "kind": "gang_sheet"}
-  ],
+  "machine_id": "8color-1",
   "queue_dir": "C:\\Users\\kevin\\Downloads\\8color-queue",
   "potry_exe": "C:\\Program Files\\PO-TRY\\MtFlatbedPrinterApp.exe",
   "potry_prnlist": "C:\\Program Files\\PO-TRY\\PrnList",
   "cap_in": 650,
   "target_in": 600,
   "window_in": 48,
-  "max_width_in": null,
+  "max_width_in": 23,
   "gap_in": 0.5,
   "flush_after_min": 30,
   "fetch_every_min": 2,

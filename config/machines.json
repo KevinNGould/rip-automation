@@ -1,0 +1,29 @@
+{
+  "_about": "Committed, no secrets. Lines are kinds of printing; each product title belongs to one line. Machines are printers, one PC each. SPEC §2.",
+  "lines": {
+    "8color": {
+      "label": "8-Color DTF",
+      "product_rules": [
+        {"title_contains": "DTF Color-Pro (8 Color CMYK+RGBO)", "kind": "gang_sheet"}
+      ]
+    },
+    "cmyk": {
+      "label": "CMYK DTF",
+      "product_rules": [
+        {"title_contains": "DTF (4 Color CMYK) - Gang Sheet Builder", "kind": "gang_sheet"},
+        {"title_contains": "DTF (4 Color CMYK) - Image by Size", "kind": "image_by_size"}
+      ]
+    },
+    "uv": {
+      "label": "UV DTF",
+      "product_rules": []
+    }
+  },
+  "machines": {
+    "8color-1": {"line": "8color", "label": "Printer #3 (8-color)", "enabled": true},
+    "cmyk-1":   {"line": "cmyk",   "label": "CMYK Printer #1",      "enabled": false},
+    "cmyk-2":   {"line": "cmyk",   "label": "CMYK Printer #2",      "enabled": false},
+    "uv-1":     {"line": "uv",     "label": "UV Printer #1 (old)",  "enabled": false},
+    "uv-2":     {"line": "uv",     "label": "UV Printer #2 (new)",  "enabled": false}
+  }
+}

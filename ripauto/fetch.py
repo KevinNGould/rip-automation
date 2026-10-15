@@ -6,9 +6,9 @@ Finds unfulfilled Shopify orders containing this machine's products and
 Downloading through this link gives the same file as the Build a Gang Sheet
 "Gang Sheet" button (label strip + QR) and ticks the app's Downloaded counter.
 
-Ported from trial/fetch_8color.py. Product rules and folders come from
-config/machine.json, the credential from config/secrets.json, and the ledger
-lives in state/processed.json.
+Ported from trial/fetch_8color.py. Product rules come from config/machines.json
+(this machine's line), folders from config/machine.json, the credential from
+config/secrets.json, and the ledger lives in state/processed.json.
 
 Usage (from the repo root):
   python -m ripauto.fetch                 list only, downloads nothing
@@ -78,7 +78,7 @@ def save_ledger(ledger):
 # ---------- product rules ----------
 
 def match_rule(title, rules):
-    """The one product rule this line item title belongs to, or None.
+    """The one product rule (from any line) this line item title belongs to, or None.
 
     Two matching rules is a config error (SPEC §2): refuse rather than guess."""
     t = (title or "").lower()
@@ -143,9 +143,11 @@ def customer_name(order):
     return ""
 
 
-def sheets_from_orders(orders, rules, min_order=0):
-    """This machine's line items from GraphQL order nodes, oldest order first."""
-    rules = [r for r in rules if r["kind"] in ENABLED_KINDS]
+def sheets_from_orders(orders, shop_rules, line, min_order=0):
+    """This line's items from GraphQL order nodes, oldest order first.
+
+    shop_rules holds every line's rules (config.all_rules), so a title that
+    matches two lines is caught here even if the other line is switched off."""
     sheets = []
     for order in orders:
         num = int(re.sub(r"\D", "", order["name"]) or 0)
@@ -154,7 +156,8 @@ def sheets_from_orders(orders, rules, min_order=0):
         lines = order["lineItems"]["nodes"]
         positions = print_ready_positions(lines)
         for li in lines:
-            if not match_rule(li["title"], rules):
+            rule = match_rule(li["title"], shop_rules)
+            if not rule or rule["line"] != line or rule["kind"] not in ENABLED_KINDS:
                 continue
             attrs = {a["key"]: a["value"] for a in li["customAttributes"]}
             sheets.append({
@@ -195,7 +198,7 @@ def find_sheets(cfg, token, min_order):
         if not data["pageInfo"]["hasNextPage"]:
             break
         cursor = data["pageInfo"]["endCursor"]
-    return sheets_from_orders(orders, cfg["product_rules"], min_order)
+    return sheets_from_orders(orders, cfg["shop_rules"], cfg["line"], min_order)
 
 
 # ---------- download ----------

@@ -1,11 +1,38 @@
 """Test fixtures: tiny PNGs and Shopify-shaped order nodes."""
 
+import copy
 import struct
 import zlib
 
+from ripauto.config import all_rules
+
 EIGHT = "DTF Color-Pro (8 Color CMYK+RGBO)"
 CMYK = "DTF (4 Color CMYK) - Gang Sheet Builder"
-RULES = [{"title_contains": EIGHT, "kind": "gang_sheet"}]
+IMAGE_BY_SIZE = "DTF (4 Color CMYK) - Image by Size"
+SHOP = {
+    "lines": {
+        "8color": {"label": "8-Color DTF",
+                   "product_rules": [{"title_contains": EIGHT, "kind": "gang_sheet"}]},
+        "cmyk": {"label": "CMYK DTF",
+                 "product_rules": [{"title_contains": CMYK, "kind": "gang_sheet"},
+                                   {"title_contains": IMAGE_BY_SIZE, "kind": "image_by_size"}]},
+        "uv": {"label": "UV DTF", "product_rules": []},
+    },
+    "machines": {
+        "8color-1": {"line": "8color", "label": "Printer #3", "enabled": True},
+        "cmyk-1": {"line": "cmyk", "label": "CMYK #1", "enabled": False},
+        "cmyk-2": {"line": "cmyk", "label": "CMYK #2", "enabled": False},
+    },
+}
+RULES = all_rules(SHOP)
+
+
+def shop(**machine_changes):
+    """A copy of SHOP with machines updated, e.g. shop(**{"cmyk-1": {"enabled": True}})."""
+    s = copy.deepcopy(SHOP)
+    for mid, change in machine_changes.items():
+        s["machines"].setdefault(mid, {}).update(change)
+    return s
 
 
 def _chunk(ctype, data):
