@@ -181,12 +181,23 @@ class Cycle(unittest.TestCase):
         self.assertEqual(L.status(self.env.ledger["a"]), L.BY_HAND)
         self.assertEqual(L.status(self.env.ledger["b"]), L.HELD)
 
-    def test_unreadable_queue_holds_everything_for_manual_check(self):
+    def test_unreadable_queue_skips_the_pass_and_holds_nothing(self):
+        # CRITIQUE B3: machine-level trouble, not a sheet problem.
         self.env.add("a", 47930, 600.0)
         d = FakeDriver()
         d.rows = None
-        self.env.run(d)
-        self.assertEqual(L.status(self.env.ledger["a"]), L.HELD)
+        summary, _ = self.env.run(d)
+        self.assertEqual(summary["waiting"], "can't read PO-TRY's queue or Downloads")
+        self.assertEqual(L.status(self.env.ledger["a"]), L.QUEUED)
+        self.assertEqual(d.calls, [])
+
+    def test_unreadable_downloads_also_skips(self):
+        self.env.add("a", 47930, 600.0)
+        self.env.downloads = None
+        d = FakeDriver()
+        summary, _ = self.env.run(d)
+        self.assertEqual(summary["waiting"], "can't read PO-TRY's queue or Downloads")
+        self.assertEqual((L.status(self.env.ledger["a"]), d.calls), (L.QUEUED, []))
 
     def test_own_previous_job_is_not_mistaken_for_hand_work(self):
         a = self.env.add("a", 47930, 400.0, qty=2)      # 2 x 400: copies split

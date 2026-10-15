@@ -57,6 +57,8 @@ COUNTDOWN_TICK_S = 2          # while the rip warning is up, check more often
 ERROR_BACKOFF_S = 60
 COUNTDOWN = "rip warning countdown"
 BUSY = "PO-TRY is busy ripping"
+UNREADABLE = "can't read PO-TRY's queue or Downloads"
+UNREADABLE_ERROR_AFTER = 3
 RESTART_PATH = STATE_DIR / "RESTART"     # RIP Agent window "Restart agent" (picks up new code)
 TASK_NAME = "OSS RIP Agent"
 
@@ -241,19 +243,29 @@ def cycle(cfg, ledger, driver, now, *, dl_names_fn, runs_dir=RUNS_DIR, save=lamb
 
     reporter.update(state="planning")
     rows = driver.queue_rows()
+    dl_names = dl_names_fn()
+    if rows is None or dl_names is None:
+        # Machine-level trouble, not a problem with any sheet (CRITIQUE B3):
+        # touch nothing this pass; the loop flags an error after 3 in a row.
+        what = "PO-TRY's RIP queue" if rows is None else "the Downloads folder"
+        log(f"Can't read {what}; skipping this pass.")
+        return done(UNREADABLE)
     if ripping_now(rows):
         log("PO-TRY is still ripping a job; waiting.")
         return done(BUSY)
     own = own_job_names(runs_dir)
     queued = [s.key for s in L.queued_sheets(ledger)]
-    if apply_hand_check(ledger, queued, queue_job_names(rows, own), dl_names_fn(), now, log):
+    if apply_hand_check(ledger, queued, queue_job_names(rows, own), dl_names, now, log):
         save()
         chosen = pick(plan_and_hold(ledger, now, limits, save, log), force, log)
 
     for n, run in enumerate(chosen[:max_runs], 1):
         keys = [i.sheet.key for i in run.items]
-        if apply_hand_check(ledger, keys, queue_job_names(driver.queue_rows(), own),
-                            dl_names_fn(), now, log):
+        rows, dl_names = driver.queue_rows(), dl_names_fn()
+        if rows is None or dl_names is None:
+            log("Can't read PO-TRY's RIP queue or Downloads right before the run; skipping this pass.")
+            return done(UNREADABLE)
+        if apply_hand_check(ledger, keys, queue_job_names(rows, own), dl_names, now, log):
             save()
             log("A sheet in this run was taken by hand just now; re-planning next cycle.")
             break
@@ -426,6 +438,7 @@ def run_loop(cfg, ledger, driver, *, fetcher, dl_names_fn, reporter, save, log,
     last_fetch = None
     paused = False
     last_wait = None
+    unreadable = 0
     log(f"Agent loop started (fetch every {fetch_every // 60} min, cycle every {LOOP_EVERY_S} s, "
         f"{gate.warn_s} s corner warning before each run).")
     reporter.update(state="idle")
@@ -465,11 +478,24 @@ def run_loop(cfg, ledger, driver, *, fetcher, dl_names_fn, reporter, save, log,
             summary = cycle(cfg, ledger, driver, now_fn(), dl_names_fn=dl_names_fn,
                             runs_dir=runs_dir, save=save, log=log, reporter=reporter,
                             can_start=gate, on_start=gate.started, force=rip_now, quiet=True)
+            if summary["waiting"] == UNREADABLE:
+                unreadable += 1
+                if unreadable == UNREADABLE_ERROR_AFTER:
+                    log(f"Couldn't read PO-TRY's queue or Downloads {unreadable} times in a row.")
+                    reporter.update(state="error", current_run=None,
+                                    last_error="can't read PO-TRY's RIP queue (or Downloads); nothing is "
+                                               "being ripped until it can")
+                gate.hold("Can't check PO-TRY's queue right now; trying again")
+            else:
+                if unreadable >= UNREADABLE_ERROR_AFTER:
+                    log("PO-TRY's queue is readable again.")
+                    reporter.update(last_error=None)
+                unreadable = 0
             if summary["waiting"] == BUSY:
                 gate.hold("Waiting for PO-TRY to finish ripping another job")
-            elif summary["waiting"] != COUNTDOWN:
+            elif summary["waiting"] not in (COUNTDOWN, UNREADABLE):
                 gate.reset()                       # run went, or isn't ready any more
-            if rip_now and summary["waiting"] not in (COUNTDOWN, BUSY):
+            if rip_now and summary["waiting"] not in (COUNTDOWN, BUSY, UNREADABLE):
                 if summary["waiting"] in ("nothing queued", "no run ready yet"):
                     log("Rip now: nothing is waiting to rip.")
                 try:

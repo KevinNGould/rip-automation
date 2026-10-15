@@ -138,6 +138,22 @@ class Loop(unittest.TestCase):
         self.assertEqual(len(d.calls), 1)                    # ripped once PO-TRY was free...
         self.assertEqual(len(deadlines), 1)                  # ...with no second 60 s countdown
 
+    def test_unreadable_queue_errors_after_three_and_recovers(self):
+        self.add("a", 47950, 600.0)
+        d = FakeDriver()
+        d.rows = None
+
+        def recover(ft):
+            if ft.sleeps == 45:
+                d.rows = []
+        rep, _ = self.loop(d, max_sleeps=50, on_sleep=recover)
+        errors = [c for c in rep.calls if c.get("state") == "error"]
+        self.assertEqual(len(errors), 1)                           # flagged once, after 3 misses
+        self.assertIn("can't read PO-TRY's RIP queue", errors[0]["last_error"])
+        self.assertIn("PO-TRY's queue is readable again.", self.logs)
+        self.assertEqual(len(d.calls), 1)                           # then ripped normally
+        self.assertEqual(L.status(self.ledger["a"]), L.RIPPED)
+
     def test_wait_5_min(self):
         self.add("a", 47950, 600.0)
         d = FakeDriver()
