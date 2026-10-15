@@ -31,6 +31,19 @@ HB = {
     "last_error": r"Stop: C:\Users\kevin\Downloads\8color-queue\47946-Kaitlyn Carter-(1).png missing",
     "sent_at": "2026-10-15T11:36:13-04:00",
     "customer": "Kaitlyn Carter",
+    "queue_detail": {"sheets": [{"order": "#47951", "position": 1, "copies": 1, "length_in": 37.2,
+                                 "waited_min": 12, "low_res": True, "file": "47951-Kaitlyn Carter-(1).png"},
+                                {"order": "Kaitlyn Carter", "position": 1}],
+                     "next_run": {"orders": ["#47951"], "planned_in": 37.2, "pictures": 1, "ready": False,
+                                  "reason": "waiting", "flush_at": "2026-10-15T12:06:00-04:00",
+                                  "to_full_in": 514.8, "runs_planned": 1, "url": "https://x"}},
+    "recent_runs": [{"id": "8color-1-20261015-113554", "ended": "2026-10-15T11:36:55",
+                     "orders": ["#47946", "#47947"], "pictures": 2, "planned_in": 135.4,
+                     "actual_in": 135.4, "outcome": "ripped", "job_name": "47946-Kaitlyn Carter-(1)"}],
+    "by_hand": [{"order": "#47932", "position": 1, "copies": 1, "length_in": 13.2,
+                 "at": "2026-10-15T11:20:00", "detail": "Downloads: 47932-Kaitlyn Carter.png"}],
+    "history": [{"date": "2026-10-15", "inches": 135.4, "runs": 1, "sheets": 2, "by_hand": 1},
+                {"date": "not a date", "inches": 5}],
 }
 
 
@@ -81,6 +94,52 @@ class Dashboard(unittest.TestCase):
             self.assertNotIn(bad, text)
         self.assertIn("#47948 file", text)
 
+    def test_detail_sections_are_cleaned(self):
+        self.post(HB)
+        hb = self.cards()["8color-1"]["hb"]
+        qd = hb["queue_detail"]
+        self.assertEqual([s["order"] for s in qd["sheets"]], ["#47951"])
+        self.assertNotIn("file", qd["sheets"][0])
+        self.assertNotIn("url", qd["next_run"])
+        self.assertEqual(qd["next_run"]["reason"], "waiting")
+        self.assertEqual(hb["recent_runs"][0]["orders"], ["#47946", "#47947"])
+        self.assertNotIn("job_name", hb["recent_runs"][0])
+        self.assertEqual(hb["by_hand"][0]["order"], "#47932")
+        self.assertEqual([h["date"] for h in hb["history"]], ["2026-10-15"])
+        self.assertNotIn("Kaitlyn", json.dumps(hb))
+
+    def test_order_search_across_machines(self):
+        self.post(HB)
+        self.post(dict(HB, machine_id="cmyk-1", recent_runs=[], by_hand=[], flags=[],
+                       queue_detail={"sheets": [{"order": "#47946", "position": 2, "copies": 1,
+                                                 "length_in": 50.0, "waited_min": 3}]}))
+        r = self.client.get("/api/search?q=%2347946").get_json()
+        self.assertTrue(r["ok"])
+        [o] = r["orders"]
+        self.assertEqual(o["order"], "#47946")
+        kinds = {(e["machine_id"], e["kind"]) for e in o["events"]}
+        self.assertEqual(kinds, {("8color-1", "ripped"), ("cmyk-1", "waiting")})
+        ripped = [e for e in o["events"] if e["kind"] == "ripped"][0]
+        self.assertEqual((ripped["ref"], ripped["inches"], ripped["label"]),
+                         ("8color-1-20261015-113554", 135.4, "Printer #3 (8-color)"))
+        # prefix search finds several orders; held + by-hand sightings recorded too
+        r = self.client.get("/api/search?q=4794").get_json()
+        found = {o["order"] for o in r["orders"]}
+        self.assertTrue({"#47946", "#47947", "#47948"} <= found)   # #47948 = held flag
+        self.assertNotIn("#47951", found)
+        r = self.client.get("/api/search?q=4793").get_json()
+        self.assertEqual([e["kind"] for e in r["orders"][0]["events"]], ["by_hand"])
+        self.assertEqual(self.client.get("/api/search?q=47").status_code, 400)
+
+    def test_repeat_sightings_update_not_duplicate(self):
+        self.post(HB)
+        self.post(HB)
+        r = self.client.get("/api/search?q=47951").get_json()
+        self.assertEqual(len(r["orders"][0]["events"]), 1)
+        if os.name == "posix":
+            db = Path(self.home) / "oss_rip.db"
+            self.assertEqual(db.stat().st_mode & 0o777, 0o600)
+
     def test_every_machine_gets_a_card(self):
         cards = self.cards()
         self.assertEqual(set(cards), {"8color-1", "cmyk-1", "cmyk-2", "uv-1", "uv-2"})
@@ -99,10 +158,14 @@ class Dashboard(unittest.TestCase):
         self.assertIn("RIP Automation", page)
         rules = {r.rule for r in self.mod.app.url_map.iter_rules()}
         self.assertEqual(rules - {"/static/<path:filename>"},
-                         {"/", "/api/heartbeat", "/api/machines"})
+                         {"/", "/tv", "/api/heartbeat", "/api/machines", "/api/search"})
+        for path in ("/api/machines", "/api/search"):           # read-only: GET only
+            methods = {m for r in self.mod.app.url_map.iter_rules() if r.rule == path for m in r.methods}
+            self.assertEqual(methods - {"HEAD", "OPTIONS"}, {"GET"})
+        self.assertIn("Find order", self.client.get("/tv").get_data(as_text=True))
 
     def test_oversized_body_refused(self):
-        r = self.client.post("/api/heartbeat", data="x" * (70 * 1024),
+        r = self.client.post("/api/heartbeat", data="x" * (140 * 1024),
                              headers={"X-Agent-Key": self.key, "Content-Type": "application/json"})
         self.assertEqual(r.status_code, 413)
 
