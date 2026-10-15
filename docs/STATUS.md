@@ -53,12 +53,21 @@ Earlier today: the 10:41 incident (backlog downloaded by mistake) is resolved. T
 
 `C:\Users\kevin\Downloads\8color-dryrun` holds copies of three already-printed sheets (#47918 12 in, #47874 6 in, #47862 48 in; planned 64.2 in). Every step below presses **Cancel**, never Print. Hands off the mouse while it runs.
 
-1. **Batch dry run, paused at the preview, for the probe:**
-   `python -m ripauto.potry --dry-run --batch --folder C:\Users\kevin\Downloads\8color-dryrun --pause-at loaded,preview`
-   At each PAUSED prompt, open a second admin prompt in the same folder and run `python tools\probe_potry.py`, then press Enter in the first. (Code reads `tools\potry_controls.txt` from disk afterwards. Running the probe twice overwrites it, so if you can, copy it to `potry_controls_loaded.txt` after the first pause.)
-2. **Multi-file Add experiment:**
-   `python -m ripauto.potry --dry-run --batch --folder C:\Users\kevin\Downloads\8color-dryrun --try-multi-add`
-3. Tell Code when they're done (or paste the end of `state\rip_log.txt`). Code then fixes the preview-size reading and picture count from the probe output.
+**Setup:** open two administrator Command Prompts (Start → type `cmd` → right-click → Run as administrator). In both, run `cd C:\Users\kevin\projects\rip-automation`. Call them Window A and Window B. Make sure PO-TRY is open and maximized.
+
+**Step 1: dry run that pauses twice so the probe can look**
+1. Window A: `python -m ripauto.potry --dry-run --batch --folder C:\Users\kevin\Downloads\8color-dryrun --pause-at loaded,preview`
+2. Hands off the mouse. It loads the three pictures, then Window A says **PAUSED at all pictures loaded**.
+3. Window B: `python tools\probe_potry.py` (it only reads the screen), then `ren tools\potry_controls.txt potry_controls_loaded.txt`
+4. Window A: press **Enter**. It runs F3, presses RIP, and stops at **PAUSED at the Print preview** with the preview open.
+5. Window B: `python tools\probe_potry.py` again (this one stays as `tools\potry_controls.txt`).
+6. Window A: press **Enter**. It presses **Cancel** and finishes ("All done.").
+
+**Step 2: does one Add take several files?**
+1. Window A: `python -m ripauto.potry --dry-run --batch --folder C:\Users\kevin\Downloads\8color-dryrun --try-multi-add`
+2. Hands off. No pauses. It ends with either "multi-add took 3 file(s) in one go" (it works) or "STOPPED: the Add dialog didn't take several files at once" (it doesn't). Either is a useful answer. If it stops, close any Open-file dialog left on screen.
+
+**Step 3: tell Code "done".** Code reads `state\rip_log.txt` and both probe files from disk; no pasting needed. Code then fixes the preview-size reading and picture count from what the probe saw.
 
 **Also needed:** the `start_from_order` number (oldest 8-color order still at 1/0 in the app's Unfulfilled tab).
 
