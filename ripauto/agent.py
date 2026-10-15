@@ -640,13 +640,21 @@ def relaunch_via_task_scheduler(log, task=TASK_NAME):
     (Task Scheduler's "restart on failure" only covers a task that fails to
     start, not one that exits with an error code: found 2026-10-15 13:09.)
     A detached cmd waits 5 s, so our lock is gone, then runs the task."""
-    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "DETACHED_PROCESS", 0)
-    try:
-        subprocess.Popen(["cmd", "/c", f'timeout /t 5 /nobreak >nul & schtasks /run /tn "{task}"'],
-                         creationflags=flags, close_fds=True)
-        log("Relaunching through Task Scheduler in about 5 seconds.")
-    except OSError as e:
-        log(f"Couldn't relaunch ({e}); start it from the RIP Agent window.")
+    # Task Scheduler runs the agent inside a job object, and a helper left in
+    # that job dies with the agent (13:51: no relaunch; the watchdog brought
+    # it back at 13:53). So the helper asks to break away from the job; if
+    # Windows refuses, the 5-minute watchdog trigger restarts the agent.
+    base = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "DETACHED_PROCESS", 0)
+    breakaway = getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0x01000000)
+    cmd = ["cmd", "/c", f'ping -n 6 127.0.0.1 >nul & schtasks /run /tn "{task}"']   # ~5 s wait, no console needed
+    for flags, how in ((base | breakaway, "in a few seconds"), (base, "within 5 minutes (watchdog)")):
+        try:
+            subprocess.Popen(cmd, creationflags=flags, close_fds=True)
+            log(f"Relaunching through Task Scheduler {how}.")
+            return
+        except OSError:
+            continue
+    log("Couldn't start the relaunch helper; the watchdog starts the agent again within 5 minutes.")
 
 
 if __name__ == "__main__":
