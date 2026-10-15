@@ -4,6 +4,21 @@ Newest first. Claude (chat) keeps this file; Claude Code adds entries when it de
 
 ## 2026-10-15
 
+**Built (Code, after the critique): priority 1, i.e. A1, A4, B3 (not live until the agent restarts)**
+- **B3 (e2c21ea):** if PO-TRY's RIP queue *or* the Downloads folder can't be read, the pass is skipped and nothing is touched; sheets stay queued. While a warning is up, the popup says "Can't check PO-TRY's queue right now; trying again". After 3 misses in a row the dashboard shows error "can't read PO-TRY's RIP queue…", cleared when a read works.
+- **A1 (1c8e97d, `ripauto/handsoff.py`):** armed from New until Print. Before every press, keystroke and focus change, the driver checks for any of:
+  - input since the agent's own last action (its own clicks and keys are marked, so only later input counts)
+  - the pointer not being where the agent left it
+  - before a real click, a window from another program in front
+
+  On any of these: back out through UI automation only (Cancel on the preview or Add dialog, no mouse), the sheets go back to **queued**, the run record says `interrupted`, and the corner popup counts down **5 min** with "Rip interrupted: someone used the mouse or keyboard". Rip now / Wait / Pause still work. After Print the guard is off.
+- **A4 (f055a77):** the agent records each job tab it opens (name + PO-TRY process id; a PO-TRY restart starts the list over, because names repeat) and closes its *earlier* tabs right before its next New. The last run's tab stays open for a person to look at. It **never closes a tab it didn't open**.
+  - How to close a tab isn't visible to UI automation, so `python -m ripauto.potry --probe-tab-close` (Kevin, once, admin, agent paused) opens an empty tab and tries close button → right-click "Close" → middle-click → Ctrl+W → Ctrl+F4 on it, saving the first that works to `state\potry_tab_close.json`.
+  - A "save changes?" prompt is only ever answered by a button named No / Don't save.
+  - Until a method is proven the agent leaves tabs alone (as now).
+- Tests: 198 pass on the printer PC (10 dashboard tests run on the Pi).
+- **Live steps (Kevin):** pause → tab-close probe → dry run with a deliberate mouse wiggle (should stop with "INTERRUPTED… Backed out") → dry run hands-off (should finish, and close the previous dry-run tab if the probe found a method) → Restart agent → Start. Spelled out in STATUS.md.
+
 **Decided (chat, 13:40): critique of the live build**
 Full text: `docs/CRITIQUE-2026-10-15.md`. In short:
 - New risks to fix first: abort the rip sequence on any human mouse/keyboard input (A1); close PO-TRY job tabs (A4); an unreadable queue skips the cycle instead of holding sheets, error after 3 failures (B3).

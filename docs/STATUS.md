@@ -4,6 +4,17 @@ Claude Code rewrites this file at the end of every working session and pushes it
 
 **Last updated:** 2026-10-15 ~13:20 (printer PC clock) · **HEAD:** see `git log -1`
 
+## Latest: critique priority 1 built (A1, A4, B3), waiting on Kevin's live steps
+
+Chat's critique: `docs/CRITIQUE-2026-10-15.md`. Batch 1 is built and tested (details in DECISIONS.md, top entry). The live agent keeps running the 13:10 code until the restart in step 5.
+
+**Kevin, in order:**
+1. **RIP Agent window → Pause agent**, and wait until it says PAUSED.
+2. **Admin prompt** in `C:\Users\kevin\projects\rip-automation`: `python -m ripauto.potry --probe-tab-close`. It opens an empty job tab and tries ways to close it; hands off while it runs. Tell Code which line says CLOSED (or "None worked").
+3. **Guard test:** `python -m ripauto.potry --dry-run --batch --folder C:\Users\kevin\Downloads\8color-dryrun`. **Wiggle the mouse** a few seconds after it starts. Expected: "INTERRUPTED: the mouse moved … Backed out; nothing was ripped", with no dialog left open in PO-TRY.
+4. **Same command again, hands off.** Expected: "All done." If step 2 found a method, it first closes the job tab from step 3.
+5. **RIP Agent window:** close it and reopen it from the desktop shortcut (to load the new window code). Click **Restart agent**. When it shows OFF, click **Start**, which also turns Pause off. The agent now runs batch 1.
+
 ## Handoff for critique (Kevin, 13:20)
 
 Kevin: "take what we have and hand off to chat to critique". **The 8-color agent is live and stays running unattended during the critique.** Code isn't changing anything until chat's critique comes back.
