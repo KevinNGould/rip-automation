@@ -18,6 +18,14 @@ Newest first. Claude (chat) keeps this file; Claude Code adds entries when it de
 **Proven in the trial**
 - #47918 fetched and ripped hands-free, about 30 s from New to "RIP finished". See `trial/`.
 
+**Decided (Code, applying the 10:xx answers to steps 1–3)**
+- **Q1, how "when they fit" is read:** the same way as rule 2 for orders. A sheet's copies split only when **all copies together exceed the cap**, so they could never share one run; then they go one copy at a time into consecutive runs. If the copies fit under the cap together but not in the current run's remaining room, the whole sheet moves to the next run rather than leaving some copies behind. Example: 3 × 300 in is split (copies 1–2 plus other work in run 1, copy 3 in run 2); 3 × 100 in after a 500 in sheet moves whole to run 2. If Kevin would rather fill the current run with some copies and move the rest, that's a small change to `_units`/packing; say so.
+- Width: copies stack lengthwise on the 23 in canvas, and 22.1–22.5 in sheets can't sit side by side, so "overrunning" means run length, as chat read it. Nothing in the code suggests otherwise. `max_width_in` = 23 is in `machine.json` and the example.
+- `config/machines.json` shape: `lines` (label, `product_rules`) and `machines` (line, label, `enabled`). `enabled` lives here, not in `machine.json`, so the one-machine-per-line check can see every machine. `machine.json` keeps `machine_id` plus local settings, and refuses to load if it still has `label`, `product_rules` or `enabled`, so there's only ever one source for them. A switched-off machine refuses to start.
+- Overlap check, two layers: at startup, any two rules on different lines where one `title_contains` contains the other are refused. At fetch time, a title that matches more than one rule (any line, enabled or not) stops the fetch. The startup check can't catch two unrelated strings that both happen to appear in one title; the fetch-time check does.
+- `machine_id` for the 8-color PC is now `8color-1` (was `8color`).
+- `potry.py` already treats any status containing "finish" as done, so "Transmission finished" is handled today. "Transmitting" or other statuses without "finish" are not yet; that goes into step 4's status list.
+
 **Decided (Kevin, 10:31): working by hand alongside the agent; the shop map**
 - People will keep downloading some orders by hand (special instructions etc.), so overlap has to be detected, not forbidden. Shopify has no trace of the app's 1/0 → 1/1 counter (#47930 vs #47932 compared: no tag, metafield, attribute or event differs). Detection is local: PO-TRY's RIP queue plus a scan of `C:\Users\kevin\Downloads` (hand-downloads for 8-color always happen on the 8-color PC). Match → skip as "taken by hand". **If the agent can't tell, it holds the sheet as "manual check".** Details in SPEC §4.
 - Go-live floor: `start_from_order` = the oldest 8-color order still at 1/0 in the app's Unfulfilled tab, read by Kevin once. This replaces the "backlog cutoff" open item.
@@ -56,7 +64,8 @@ Newest first. Claude (chat) keeps this file; Claude Code adds entries when it de
 - Q6 Computer (host) names for each of the five printer PCs.
 - Confirm the driver's F3 keypress actually lands.
 - Replace the borrowed Pi paperwork-printer token with a dedicated Shopify app (read_orders, read_customers, Name access).
-- (Code) **"Matches two machines → refuse" can't be fully checked.** Each PC's `machine.json` knows only its own product rules, so the agent can only catch overlap within one machine. Suggestion: a committed `config/machines.json` holding every machine's product rules (no secrets), which each agent checks at startup. This is a spec change, so it's for chat to decide.
-- (Code) **Printable width for 8-color?** `max_width_in` is `null` (unchecked) until there's a number. #47918 is 22.1 in wide by PNG and by PO-TRY.
+- ~~(Code) "Matches two machines → refuse" can't be fully checked~~ settled: `config/machines.json`, built (see Code entry above).
+- ~~(Code) Printable width for 8-color?~~ settled: 23 in.
+- (Code) **SPEC wording to tidy:** §3's config-split bullet still lists "label, product rules" under `machine.json`, and §4 says "Product rules come from `machine.json`". Both contradict §2 (rules live in `machines.json`). Code follows §2.
 - ~~(Code) Backlog cutoff~~ settled 10:31, see above. Was: **Backlog cutoff before go-live (step 6).** The live list shows 26 unhandled 8-color sheets on unfulfilled orders, going back to #43227. Most were presumably printed by hand already. Before the agent runs unattended, we need either `fetch --mark-done` (optionally with `--from`) or a `start_from_order` setting. Also #47914 was hand-downloaded during the verification, but the agent's ledger still shows it as new.
 

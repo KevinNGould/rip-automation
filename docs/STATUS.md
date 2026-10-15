@@ -2,7 +2,7 @@
 
 Claude Code rewrites this file at the end of every working session and pushes it. Chat reads this file first. Decisions and open questions live in `docs/DECISIONS.md`; the spec lives in `docs/SPEC.md`. Git history holds older versions of this file.
 
-**Last updated:** 2026-10-15, after build steps 1–3 · **HEAD:** see `git log -1`
+**Last updated:** 2026-10-15, after applying chat's 10:xx answers to steps 1–3 · **HEAD:** see `git log -1`
 
 ---
 
@@ -10,54 +10,63 @@ Claude Code rewrites this file at the end of every working session and pushes it
 
 | SPEC §12 step | State |
 |---|---|
-| 1. Skeleton, config split, port scripts | **Done.** Fetch re-checked live. PO-TRY checks still to run (below). |
+| 1. Skeleton, config split, port scripts | **Done.** Kevin verified `--inspect-queue` and the dry run on the printer PC (10:18). |
 | 2. Naming fix + PNG length + tests | **Done** |
-| 3. Planner + tests | **Done** |
-| 4. Driver: multi-file runs + preview length gate | **Not started. Waiting for Kevin's go-ahead** (instructed stop point) |
+| 3. Planner + tests | **Done**, now on the new Q1 rules |
+| 4. Driver multi-file runs + length gate + hand-download check + `start_from_order` | **Not started. Plan approved by chat; waiting for Kevin's go-ahead** (and his `start_from_order` number) |
 | 5–8 | Not started |
 
-Tests: `python -m unittest` from the repo root runs 49 tests, all passing.
+Tests: `python -m unittest` from the repo root runs 66 tests, all passing.
 
-## What exists now
+## This session (pulled chat's 4 commits, then)
 
-- `ripauto/config.py`: loads `config/machine.json` (no secrets) and `config/secrets.json` (Shopify credential only). Both are git-ignored and exist on the 8-color PC.
-- `ripauto/fetch.py`: port of `trial/fetch_8color.py`. Product rules come from `machine.json`. File names follow `{order#}-{customer}-{order ID}-{size}-{position}-({qty})`. The ledger is `state/processed.json`, and each downloaded sheet's record holds position, qty, measured length/width and where it came from, the low-res flag, the file and `fetched_at`.
-- `ripauto/sheets.py`: naming, gang-sheet position, PNG size from `pHYs`, with fallbacks to `_Actual Height` and then the variant title.
-- `ripauto/planner.py`: `plan(sheets, now, limits) -> (runs, holds)`, a pure function covering SPEC §6.
-- `ripauto/potry.py`: port of `trial/rip_driver.py`. Behavior is unchanged: one sheet per job, and no length gate yet.
+- **`config/machines.json`** (committed): lines `8color` / `cmyk` / `uv` with their product rules, and machines `8color-1` (enabled), `cmyk-1`, `cmyk-2`, `uv-1`, `uv-2` (off). Labels follow Kevin's shop map.
+- **`ripauto/config.py`:** loads `machines.json` and refuses to start in three cases:
+  - rules on two lines could match one title
+  - two machines on one line are enabled
+  - this PC's machine is unknown or switched off
+
+  It merges this machine's line, label and rules into the config.
+- **`machine.json` (local and example):** `machine_id` is now `8color-1`, `max_width_in` is 23, and `label`, `product_rules` and `enabled` were removed. They now live only in `machines.json`; a leftover copy is refused.
+- **`ripauto/fetch.py`:** matches each title against every line's rules. A title that matches two rules stops the fetch; otherwise it keeps this line's items.
+- **`ripauto/planner.py`:** applies Kevin's Q1 answer.
+  - Each copy is its own picture.
+  - A sheet is held only when one copy is over 650 in.
+  - Copies split across runs only when together they're over the cap (how "when they fit" is read: DECISIONS → Code entry).
+  - Runs now list `RunItem(sheet, copies)`.
 
 ## Verified
 
-- Ported fetch, list-only, against live Shopify: output is identical to the trial script (27 sheets, #47918 done).
-- Positions match the app's file names: #47862 → `…48in 4ft-1-…` and `…600in 50ft-2-…`.
-- Real #47918 PNG: 6630 × 3077 px at 11811 px/m = **22.100 × 10.257 in**, the same as PO-TRY's W/H readout.
-- `_Actual Height` comes in inches (`"44.58 in"`) but leaves out the label strip: #47918 says 9.06 in against 10.257 in measured.
-- A planner dry pass over today's live queue (lengths from titles/attributes, no downloads) made 3 runs (637.1 / 593.0 / 645.1 in), all full, with no holds.
-- Token: it now exists only in `config/secrets.json`. The old `C:\Users\kevin\rip-auto\config.json` has a blank token plus a pointer note, so the trial scripts no longer run.
+- All 66 tests pass, including a check that the committed `machines.json` loads and that only `8color-1` is enabled.
+- Live list-only fetch with the new config: 29 sheets on unfulfilled orders, 28 not yet handled.
+- Planner pass over the live queue (lengths from titles/attributes, nothing downloaded): 637.1 / 605.5 / 645.1 in full runs, plus one 52.8 in sheet (#47935) waiting. No holds at 23 in width.
 
-## Not verified yet (Kevin, admin Command Prompt, in the repo folder)
+## Waiting on Kevin
 
-1. `python -m ripauto.potry --inspect-queue`: it should list the RIP queue rows, including #47918 as `RIP finished`.
-2. `python -m ripauto.potry --dry-run --limit 1 --folder C:\Users\kevin\Downloads\8color-dryrun`: this folder holds a **copy** of the #47918 sheet, so the real queue folder isn't touched. You should see New → Add → F3 → RIP → preview → **Cancel**, and the log ends "Dry run complete". The log is in `state/rip_log.txt`.
+1. **Go-ahead for step 4.**
+2. **`start_from_order`:** the oldest 8-color order still showing **1/0** in the app's Unfulfilled tab (SPEC §4 go-live floor).
 
-Report back what each printed (or paste `state/rip_log.txt`).
+## Needs a decision / tidy (details in DECISIONS.md → Open)
 
-## Needs a decision (details in DECISIONS.md → Open, items marked "(Code)")
-
-- **Backlog cutoff before go-live.** The agent sees 26 unhandled 8-color sheets back to #43227, including #47914, which was hand-downloaded. Choose between `fetch --mark-done [--from N]` and a `start_from_order` setting. This must be settled before step 6.
-- **Printable width** for 8-color (`max_width_in`, currently unchecked).
-- **Cross-machine product overlap check:** proposal for a committed `config/machines.json`.
-- Still open from before: Q1–Q6, and confirming that F3 lands.
+- **Chat:** SPEC §3 and §4 still say product rules live in `machine.json`. Code follows §2 (`machines.json`); please tidy the wording.
+- **Chat/Kevin:** check the Q1 reading. Copies split only when they can't all fit under the cap, not merely when the current run is nearly full.
+- Still open: Q4 (flush minutes), Q5 (UV titles, CMYK/UV caps), Q6 (five PC host names), confirming that F3 lands, and the dedicated Shopify app.
 
 ## Housekeeping notes
 
-- The old trial `config.json` was ACL-restricted to user `kevin`. The new `config/secrets.json` has default permissions; restricting it the same way is suggested. Kevin's call, so Code hasn't changed any permissions.
-- Commits are made as `KevinNGould` (repo-local git config) with a Claude co-author line.
+- The new `config/secrets.json` still has default file permissions; the old trial `config.json` was locked to user `kevin`. Locking it is Kevin's call, so it's unchanged.
+- `C:\Users\kevin\Downloads\8color-dryrun` holds a copy of the #47918 sheet for dry runs. It can stay for step 4's dry runs.
 
-## Proposed next step for Code: step 4 (for chat/Kevin to review before it starts)
+## Step 4 plan (approved by chat; updated with this session's spec changes)
 
-1. Ledger states per sheet: `queued` → `in_run` → `ripped` / `held`, with a run record in `state/runs/{run-id}.json`.
-2. Driver takes a run (list of files × qty) instead of one PNG. First, test whether the Add dialog accepts several files at once; if it doesn't, use one Add per picture.
-3. Confirm the loaded picture count. How to count pictures in the layout is unknown, so a read-only probe is needed while a multi-picture job is loaded.
-4. Preview length gate: find the `… inch` texts in the Print preview through UIA. This needs a read-only probe while the preview is open, so add a `--pause-at-preview` flag to the dry run that waits for Enter before pressing Cancel.
-5. Dry-run a 2–3 sheet batch from copies, then one real run only with Kevin's go-ahead.
+1. **Ledger states** per sheet: `queued` → `in_run` → `ripped` / `held` / `by_hand`. Because copies can now split, also track `copies_ripped`, so a sheet is `ripped` only when all its copies are done. The planner gets `qty − copies_ripped` as `Sheet.qty`. Run records go in `state/runs/{run-id}.json`.
+2. **`start_from_order`** in `machine.json`: fetch ignores orders below it, and `--from` still overrides it on the command line.
+3. **Hand-download check** (SPEC §4): before planning, and again right before each run starts, check two places:
+   - PO-TRY's queue rows (`{order#}-` prefix plus position)
+   - the top level of `hand_download_dir`, for an app-named file with the same order# and position
+
+   Outcomes: `by_hand`, free, or held as "manual check". The decision logic is a pure function with a test for each outcome; reading the folder and the queue are thin wrappers around it.
+4. **Driver takes a run** (files × copies) instead of one PNG. First test whether the Add dialog accepts several files at once; if not, do one Add per picture. Confirm the loaded picture count; this needs a read-only probe while a multi-picture job is loaded.
+5. **Preview length gate:** a `--pause-at-preview` dry-run flag that waits for Enter before pressing Cancel, so `tools/probe_potry.py` can find the `… inch` text. Cancel and hold the whole run if the length is unreadable or over `cap_in`.
+6. **Queue statuses** kept in one list in `potry.py`. "RIP finished", "Transmission finished" and any later status count as done; new strings get added as they're seen.
+7. **Test runs:** dry-run a 2–3 sheet batch from copies in `8color-dryrun`, then one real run only with Kevin's go-ahead.
