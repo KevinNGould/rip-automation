@@ -6,18 +6,22 @@ It returns every run it would make from the current queue, each marked ready
 or waiting, plus the sheets it refuses to rip (holds).
 
 Rules, in SPEC order:
-  1. A sheet is never split: all N copies of a qty-N sheet go in one run.
-  2. An order's sheets stay together when they fit in one run; an order too
-     long for one run goes sheet by sheet, so it lands in consecutive runs.
+  1. Each copy of a qty-N sheet is its own picture, and a picture is never
+     split. A sheet's copies stay in one run when together they fit under
+     cap_in; otherwise they go copy by copy, so they land in consecutive runs.
+  2. An order's sheets stay together when they fit under cap_in; an order too
+     long for one run goes sheet by sheet, the same way.
   3. Oldest first, then first-fit: a unit joins the current run only if the
      run's planned length stays <= target_in + window_in. A unit alone in a
      run may go up to cap_in.
   4. A run is ready when full (>= target_in - window_in) or when its oldest
      sheet has waited flush_after_min.
-  5. A sheet whose copies together exceed cap_in is held, never ripped.
+  5. A sheet whose single copy exceeds cap_in is held, never ripped.
+  6. Strictly first come, first served: order number, then position.
+     Low-res sheets rip normally; the flag rides along on the Sheet.
 
-Planned length = sum(length x qty) + gap_in x (pictures - 1), where every
-copy is one picture. The cap applies to planned length, gaps included.
+Planned length = sum(length x copies) + gap_in x (pictures - 1). The cap
+applies to planned length, gaps included.
 """
 
 from dataclasses import dataclass, field
@@ -59,7 +63,7 @@ class Sheet:
     order_num: int
     length_in: Optional[float]
     ready_at: datetime            # when it landed in the queue (fetched_at)
-    qty: int = 1
+    qty: int = 1                  # copies still to rip
     position: int = 1
     width_in: Optional[float] = None
     low_res: bool = False
@@ -74,8 +78,14 @@ class Sheet:
 
 
 @dataclass
+class RunItem:
+    sheet: Sheet
+    copies: int                   # how many of the sheet's copies go in this run
+
+
+@dataclass
 class Run:
-    sheets: List[Sheet]
+    items: List[RunItem]
     planned_in: float
     pictures: int
     oldest_wait_min: float
@@ -83,8 +93,12 @@ class Run:
     reason: str                   # "full" | "flush" | "waiting"
 
     @property
+    def sheets(self):
+        return [i.sheet for i in self.items]
+
+    @property
     def orders(self):
-        return list(dict.fromkeys(s.order for s in self.sheets))
+        return list(dict.fromkeys(i.sheet.order for i in self.items))
 
 
 @dataclass
@@ -95,15 +109,15 @@ class Hold:
 
 @dataclass(eq=False)          # compared by identity when removing taken units
 class _Unit:
-    sheets: List[Sheet] = field(default_factory=list)
+    items: List[RunItem] = field(default_factory=list)
 
     @property
     def inches(self):
-        return sum(s.length_in * s.qty for s in self.sheets)
+        return sum(i.sheet.length_in * i.copies for i in self.items)
 
     @property
     def pictures(self):
-        return sum(s.qty for s in self.sheets)
+        return sum(i.copies for i in self.items)
 
 
 def planned_length(inches, pictures, gap_in):
@@ -118,26 +132,33 @@ def _hold_reason(s, lim):
     if lim.max_width_in is not None and s.width_in is not None \
             and s.width_in > lim.max_width_in + EPS:
         return f"wider than {lim.max_width_in:g} in ({s.width_in:.2f} in)"
-    total = planned_length(s.length_in * s.qty, s.qty, lim.gap_in)
-    if total > lim.cap_in + EPS:
-        if s.qty > 1 and s.length_in <= lim.cap_in + EPS:
-            return (f"over {lim.cap_in:g} in: {s.qty} copies x {s.length_in:.1f} in "
-                    f"= {total:.1f} in (one copy fits; needs a decision)")
+    if s.length_in > lim.cap_in + EPS:
         return f"over {lim.cap_in:g} in"
     return None
 
 
+def _fits_alone(unit, lim):
+    return planned_length(unit.inches, unit.pictures, lim.gap_in) <= lim.cap_in + EPS
+
+
 def _units(sheets, lim):
-    """Order groups, or single sheets when an order can't fit in one run."""
+    """Whole orders where they fit under the cap, else whole sheets, else
+    single copies. Keeps queue order, so split work lands in consecutive runs."""
     by_order = {}
     for s in sheets:
-        by_order.setdefault(s.order, _Unit()).sheets.append(s)
+        by_order.setdefault(s.order, []).append(s)
     units = []
-    for u in by_order.values():
-        if planned_length(u.inches, u.pictures, lim.gap_in) <= lim.cap_in + EPS:
-            units.append(u)
-        else:
-            units.extend(_Unit([s]) for s in u.sheets)
+    for order_sheets in by_order.values():
+        whole = _Unit([RunItem(s, s.qty) for s in order_sheets])
+        if _fits_alone(whole, lim):
+            units.append(whole)
+            continue
+        for s in order_sheets:
+            sheet_unit = _Unit([RunItem(s, s.qty)])
+            if _fits_alone(sheet_unit, lim):
+                units.append(sheet_unit)
+            else:
+                units.extend(_Unit([RunItem(s, 1)]) for _ in range(s.qty))
     return units
 
 
@@ -163,18 +184,25 @@ def plan(sheets, now, limits) -> Tuple[List[Run], List[Hold]]:
                 inches += u.inches
                 pictures += u.pictures
         remaining = [u for u in remaining if u not in taken]
-        run_sheets = [s for u in taken for s in u.sheets]
-        runs.append(_finish(run_sheets, inches, pictures, now, limits))
+        runs.append(_finish(taken, inches, pictures, now, limits))
     return runs, holds
 
 
-def _finish(sheets, inches, pictures, now, lim):
+def _finish(units, inches, pictures, now, lim):
+    merged = {}                   # one item per sheet, copies added up
+    for u in units:
+        for i in u.items:
+            if i.sheet.key in merged:
+                merged[i.sheet.key].copies += i.copies
+            else:
+                merged[i.sheet.key] = RunItem(i.sheet, i.copies)
+    items = list(merged.values())
     planned = planned_length(inches, pictures, lim.gap_in)
-    wait = max((now - s.ready_at).total_seconds() / 60 for s in sheets)
+    wait = max((now - i.sheet.ready_at).total_seconds() / 60 for i in items)
     if planned >= lim.full_min - EPS:
         ready, reason = True, "full"
     elif wait >= lim.flush_after_min:
         ready, reason = True, "flush"
     else:
         ready, reason = False, "waiting"
-    return Run(sheets, round(planned, 3), pictures, round(wait, 1), ready, reason)
+    return Run(items, round(planned, 3), pictures, round(wait, 1), ready, reason)

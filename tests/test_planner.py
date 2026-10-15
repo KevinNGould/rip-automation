@@ -19,6 +19,10 @@ def keys(run):
     return [s.key for s in run.sheets]
 
 
+def copies(run):
+    return [(i.sheet.key, i.copies) for i in run.items]
+
+
 class CapEdges(unittest.TestCase):
     def test_exactly_650_rips_alone(self):
         runs, holds = plan([sheet(1, 650.0)], NOW, LIM)
@@ -32,17 +36,36 @@ class CapEdges(unittest.TestCase):
         self.assertEqual(runs, [])
         self.assertEqual(holds[0].reason, "over 650 in")
 
-    def test_qty_pushing_over_is_held_even_if_one_copy_fits(self):
+    def test_qty_pushing_over_splits_copies_across_runs(self):
         runs, holds = plan([sheet(1, 400.0, qty=2)], NOW, LIM)
-        self.assertEqual(runs, [])
-        self.assertIn("over 650 in", holds[0].reason)
-        self.assertIn("one copy fits", holds[0].reason)
+        self.assertEqual(holds, [])
+        self.assertEqual([copies(r) for r in runs], [[("1-1", 1)], [("1-1", 1)]])
+        self.assertEqual([r.planned_in for r in runs], [400.0, 400.0])
 
-    def test_qty_over_cap_only_because_of_gaps_is_held(self):
+    def test_qty_over_cap_only_because_of_gaps_splits(self):
         # 2 x 325 = 650, plus one 0.5 in gap = 650.5 > cap.
         runs, holds = plan([sheet(1, 325.0, qty=2)], NOW, LIM)
+        self.assertEqual(holds, [])
+        self.assertEqual([copies(r) for r in runs], [[("1-1", 1)], [("1-1", 1)]])
+
+    def test_single_copy_over_cap_is_held_whatever_the_qty(self):
+        runs, holds = plan([sheet(1, 651.0, qty=3)], NOW, LIM)
         self.assertEqual(runs, [])
-        self.assertEqual(len(holds), 1)
+        self.assertEqual(holds[0].reason, "over 650 in")
+
+    def test_split_copies_share_runs_with_other_sheets(self):
+        # 3 x 300 can't fit under the cap together, so copies go one by one:
+        # run 1 = 300 + 300 (+gap) + #2's 40 (+gap); the third copy waits for run 2.
+        runs, _ = plan([sheet(1, 300.0, qty=3), sheet(2, 40.0)], NOW, LIM)
+        self.assertEqual([copies(r) for r in runs],
+                         [[("1-1", 2), ("2-1", 1)], [("1-1", 1)]])
+        self.assertEqual(runs[0].planned_in, 641.0)
+
+    def test_copies_that_fit_together_are_not_split(self):
+        # 3 x 100 fits under the cap, so it moves to the next run whole
+        # rather than leaving one copy behind in a run that only has room for one.
+        runs, _ = plan([sheet(1, 500.0), sheet(2, 100.0, qty=3)], NOW, NO_GAP)
+        self.assertEqual([copies(r) for r in runs], [[("1-1", 1)], [("2-1", 3)]])
 
     def test_qty_within_cap_counts_every_copy(self):
         runs, _ = plan([sheet(1, 200.0, qty=3)], NOW, LIM)
@@ -164,19 +187,31 @@ class Invariants(unittest.TestCase):
                         + rng.random(), qty=rng.choice([1, 1, 1, 2, 3]), position=pos,
                         waited_min=rng.randint(0, 60)))
             runs, holds = plan(sheets, NOW, LIM)
-            seen = [s.key for r in runs for s in r.sheets] + [h.sheet.key for h in holds]
-            self.assertEqual(sorted(seen), sorted(s.key for s in sheets))
+            placed = {}
+            for r in runs:
+                for i in r.items:
+                    placed[i.sheet.key] = placed.get(i.sheet.key, 0) + i.copies
+            held = {h.sheet.key for h in holds}
+            self.assertFalse(held & set(placed))
+            for s in sheets:                       # every copy ripped once, or held
+                if s.key in held:
+                    self.assertGreater(s.length_in, LIM.cap_in)
+                else:
+                    self.assertEqual(placed.get(s.key), s.qty, s.key)
+            for s in sheets:                       # copies that fit together stay together
+                if s.key not in held and s.length_in * s.qty + 0.5 * (s.qty - 1) <= LIM.cap_in:
+                    self.assertEqual(sum(1 for r in runs if s.key in keys(r)), 1, s.key)
             for r in runs:
                 self.assertLessEqual(r.planned_in, LIM.cap_in)
                 if r.planned_in > LIM.fill_max + 1e-6:      # only a lone sheet or order
                     self.assertEqual(len(r.orders), 1)
-                total = sum(s.length_in * s.qty for s in r.sheets) + 0.5 * (r.pictures - 1)
+                total = sum(i.sheet.length_in * i.copies for i in r.items) + 0.5 * (r.pictures - 1)
+                self.assertEqual(r.pictures, sum(i.copies for i in r.items))
                 self.assertAlmostEqual(r.planned_in, total, places=2)
             # An order that fits in one run is never split.
             orders = {}
             for s in sheets:
                 orders.setdefault(s.order, []).append(s)
-            held = {h.sheet.key for h in holds}
             for o, ss in orders.items():
                 ss = [s for s in ss if s.key not in held]
                 if not ss:
