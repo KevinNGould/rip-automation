@@ -27,7 +27,14 @@ Newest first. Claude (chat) keeps this file; Claude Code adds entries when it de
 - **Code's slip (14:03):** that restart test went through the window's Start path, which also turns Pause off. So it **lifted Kevin's pause**. The agent has run unpaused since 14:03:21, which is the state step 5 was heading for, but it wasn't Kevin's click.
   - **Fix (dce9dd5):** Restart now keeps the pause switch as it was; only the Start button means "go".
   - Since 14:03 the agent has downloaded #47977 (24.0 in) and is downloading #47979 (large file). It rips them with the corner warning first; nothing ripped as of 14:04.
-- **Current code in the running agent (pid 20336, 14:03:21):** everything through c968dfd, i.e. A1, A4 with `x_button`, B3, corner warning. The window's relaunch/pause fixes are in the window, which picks them up when reopened.
+- **Kevin (14:06): close jobs as soon as they're fully ripped**, because too many open jobs make PO-TRY's tab bar flaky. **Built (2e03634):**
+  - after "RIP finished" the agent switches to the layout view, closes its own tab(s) with the × click, and returns to the RIP queue view
+  - runs cancelled at the preview close their tab too
+  - still only tabs the agent opened (a person's tab may hold an unsaved layout, and the agent can't tell which person-made tabs are safely ripped)
+  - guarded by the hands-off check
+
+  Restarted onto it at 14:06:58 via the window's restart path: **back in 10 s, pause state kept** (off). First real use: the ~14:33 run (#47977, #47979).
+- **Earlier code in the running agent (pid 20336, 14:03:21):** everything through c968dfd, i.e. A1, A4 with `x_button`, B3, corner warning. The window's relaunch/pause fixes are in the window, which picks them up when reopened.
 - **Live steps (Kevin):** pause → tab-close probe → dry run with a deliberate mouse wiggle (should stop with "INTERRUPTED… Backed out") → dry run hands-off (should finish, and close the previous dry-run tab if the probe found a method) → Restart agent → Start. Spelled out in STATUS.md.
 
 **Decided (chat, 13:40): critique of the live build**

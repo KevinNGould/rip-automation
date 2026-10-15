@@ -4,9 +4,9 @@ Claude Code rewrites this file at the end of every working session and pushes it
 
 **Last updated:** 2026-10-15 ~13:20 (printer PC clock) · **HEAD:** see `git log -1`
 
-## Latest (14:05): critique priority 1 is LIVE
+## Latest (14:07): critique priority 1 is LIVE, plus closing each job tab right after its rip
 
-- The agent (pid 20336, since 14:03:21) runs **A1** (proven live both ways), **A4** (× close proven on an empty tab, `x_button` at 12 px), and **B3**. It's unpaused and downloading #47977 and #47979.
+- The agent (pid 20384, since 14:07:03) runs **A1** (proven live both ways), **A4** (× close proven on an empty tab, `x_button` at 12 px), and **B3**. It's unpaused and downloading #47977 and #47979.
 - **Restart agent** now relaunches through the RIP Agent window (tested: 16 s) and keeps the pause switch as it was. Kevin should close and reopen the window from the desktop shortcut to pick up that fix.
 - Code's slip: a restart test at 14:03 lifted Kevin's pause (DECISIONS.md, top entry). Fixed.
 - Next per the critique: A2 resume prompt, then B1 spacing probe (needs Kevin), B2 version check.
