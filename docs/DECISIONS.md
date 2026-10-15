@@ -17,6 +17,9 @@ Newest first. Claude (chat) keeps this file; Claude Code adds entries when it de
   - A "save changes?" prompt is only ever answered by a button named No / Don't save.
   - Until a method is proven the agent leaves tabs alone (as now).
 - Tests: 198 pass on the printer PC (10 dashboard tests run on the Pi).
+- **Live results (Kevin, 13:43–13:44):**
+  - **A1 proven both ways.** A dry run with a deliberate mouse wiggle stopped "before opening the file", closed the Add dialog through automation and backed out, with nothing ripped. A hands-off dry run went through New, 3 Adds, F3, RIP and the preview (22.5 × 65.237, gate ok) and Cancel with **no false trip** from the agent's own clicks.
+  - **A4: no close method found.** On an empty tab (Job25), close button (none exposed), right-click "Close", middle-click, Ctrl+W and Ctrl+F4 all failed. The probe now prints the tab bar's controls and any right-click menu items. Asked Kevin how he closes a tab by hand. Until a method is found the agent leaves tabs alone (as before); it records its own tabs, so closing can start later without guessing which are its own.
 - **Live steps (Kevin):** pause → tab-close probe → dry run with a deliberate mouse wiggle (should stop with "INTERRUPTED… Backed out") → dry run hands-off (should finish, and close the previous dry-run tab if the probe found a method) → Restart agent → Start. Spelled out in STATUS.md.
 
 **Decided (chat, 13:40): critique of the live build**
