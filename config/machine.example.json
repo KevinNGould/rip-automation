@@ -11,6 +11,7 @@
   "cap_in": 650,
   "target_in": 600,
   "window_in": 48,
+  "max_width_in": null,
   "gap_in": 0.5,
   "flush_after_min": 30,
   "fetch_every_min": 2,

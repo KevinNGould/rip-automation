@@ -28,6 +28,7 @@ MACHINE_DEFAULTS = {
     "gap_in": 0.5,
     "flush_after_min": 30,
     "fetch_every_min": 2,
+    "max_width_in": None,      # printable width; None = not checked (DECISIONS, Open)
 }
 
 
