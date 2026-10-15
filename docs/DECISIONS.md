@@ -18,6 +18,14 @@ Newest first. Claude (chat) keeps this file; Claude Code adds entries when it de
 **Proven in the trial**
 - #47918 fetched and ripped hands-free, about 30 s from New to "RIP finished". See `trial/`.
 
+**Proven (13:13): first fully unattended rip, on the new code**
+- Kevin OK'd it. Code stopped the agent with `schtasks /end` (no admin needed), re-queued #47957/#47960/#47964, and started it with `schtasks /run`.
+- A stray `state\RESTART` flag made the new agent stop 2 s after its 13:08:59 start (origin unknown; asked Kevin). That showed Task Scheduler's restart-on-failure does **not** restart a task that exits non-zero. Fixed (8b6c086): Restart now relaunches through `schtasks /run` itself, and `install_task.ps1` gains a 5-minute watchdog trigger. The watchdog needs Kevin to re-run the installer as admin.
+- 13:10:36: agent back on the new code. **13:10:42: corner warning "197 in, 3 sheets, #47957 #47960 #47964; starts in 60 s".** 13:11:54: started after the countdown plus 5 s still. Multi-add, F3, **OCR 22.5 × 197.037** against 197.0 planned, gate ok, RIP finished 13:13:07 (~50 s), queue size 22.500×197.037.
+- Ledger: all three ripped. Files are in `ripped\8color-1-20261015-131144\`. Run record: planned = preview = actual = 197.037, gap 1.0. Note: the same three sheets gave 195.037 (gaps ≈ 0) at 13:00, so F3 spacing varies between attempts, not just between sheet sets. The gate now allows 0–1 in per gap.
+- Dashboard: running/idle; 332.4 in today over 2 runs (5 sheets); 0 held. Order search for #47960 shows the whole trail: waiting → cancelled at preview (13:00) → held → ripped in run …131144. #47952 shows waiting → done by hand.
+- **Small follow-up (Code):** the agent's own downloaded copies of by-hand sheets (#47951, #47952) stay in `8color-queue`. Move them to `8color-queue\by_hand\` when the hand check marks them, so the queue folder only holds work still to do.
+
 **First unattended run (12:59–13:00): hand check right, OCR cancelled, fixed**
 - The run was due 12:56:26 and waited for 60 s without input (old rule), because Kevin was at the PC. It started 12:59:57.
 - **Hand check, on real hand work:** #47951 was found in Kevin's Downloads and #47952 in PO-TRY's RIP queue (ripped by hand). Both were marked by_hand and skipped.

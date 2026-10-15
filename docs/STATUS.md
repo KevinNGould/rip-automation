@@ -2,7 +2,7 @@
 
 Claude Code rewrites this file at the end of every working session and pushes it. Chat reads this file first. Decisions and open questions live in `docs/DECISIONS.md`; the spec lives in `docs/SPEC.md`. Git history holds older versions of this file.
 
-**Last updated:** 2026-10-15 ~13:05 (printer PC clock) · Agent live since 12:26. **First unattended run 13:00: hand check skipped 2 orders correctly; the preview OCR missed the width, so it cancelled and held 3 sheets. Fixed in code; waiting on Kevin to OK a restart + re-queue.** See DECISIONS.md "First unattended run" · **HEAD:** see `git log -1`
+**Last updated:** 2026-10-15 ~13:15 (printer PC clock) · **8-color agent live and unattended on the new code since 13:10. First fully unattended rip at 13:13** (#47957 #47960 #47964, 197.037 in, after the corner warning). 332.4 in ripped today over 2 runs; hand check skipped #47951 and #47952. See DECISIONS.md "Proven (13:13)" · **HEAD:** see `git log -1`
 
 ## Go-live (12:26)
 
