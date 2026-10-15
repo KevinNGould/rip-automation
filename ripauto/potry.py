@@ -1128,6 +1128,9 @@ def main():
                 pictures, planned = batch_pictures([png], cfg["gap_in"])
                 rip_pictures(main_win, pid, pictures, cfg, planned, dry_run=True,
                              pause_at=pause_at)
+    except HumanInput as e:
+        log(f"INTERRUPTED: {e}. Backed out; nothing was ripped.")
+        sys.exit(1)
     except Stop as e:
         log(f"STOPPED: {e}")
         sys.exit(1)
