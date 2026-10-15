@@ -19,6 +19,7 @@ class FakeDriver:
         self.calls = []
 
     def queue_rows(self):
+        self.row_reads = getattr(self, "row_reads", 0) + 1
         return self.rows
 
     def rip(self, pictures, planned_in, dry_run, on_progress=None):
@@ -253,6 +254,33 @@ class Cycle(unittest.TestCase):
         rep = RecordingReporter()
         self.env.run(FakeDriver(fail="the job never appeared in the RIP queue"), reporter=rep)
         self.assertEqual(rep.states()[-1], "error")
+
+    def test_po_try_untouched_when_nothing_is_ready(self):
+        d = FakeDriver()
+        summary, _ = self.env.run(d)                              # nothing queued
+        self.assertEqual(summary["waiting"], "nothing queued")
+        self.env.add("a", 47930, 100.0)                           # queued, not full, not due
+        summary, _ = self.env.run(d)
+        self.assertEqual(summary["waiting"], "no run ready yet")
+        self.assertEqual((getattr(d, "row_reads", 0), d.calls), (0, []))
+
+    def test_waits_while_someone_uses_the_pc(self):
+        self.env.add("a", 47930, 600.0)
+        d = FakeDriver()
+        summary, _ = self.env.run(d, can_start=lambda: False)
+        self.assertEqual(summary["waiting"], "someone is using this PC")
+        self.assertEqual((getattr(d, "row_reads", 0), d.calls), (0, []))
+        self.assertEqual(L.status(self.env.ledger["a"]), L.QUEUED)
+
+    def test_waits_while_po_try_is_ripping(self):
+        self.env.add("a", 47930, 600.0)
+        d = FakeDriver(rows=[{"Job name": "47000-x-(1)", "Status": "Ripping", "Processing": "40"}])
+        summary, _ = self.env.run(d)
+        self.assertEqual(summary["waiting"], "PO-TRY is busy ripping")
+        self.assertEqual(d.calls, [])
+        d.rows = [{"Job name": "47000-x-(1)", "Status": "Transmission finished", "Processing": "100"}]
+        summary, _ = self.env.run(d)
+        self.assertEqual(len(summary["ripped"]), 1)
 
     def test_two_runs_in_one_cycle_get_distinct_ids(self):
         self.env.add("a", 47930, 600.0)

@@ -35,7 +35,7 @@ from . import ledger as L
 from .config import STATE_DIR, load_dashboard_key, load_machine, load_or_exit
 from .handcheck import BY_HAND, FREE, download_names, hand_check, queue_job_names
 from .planner import Limits, plan
-from .potry import parse_size_cell
+from .potry import RIPPING_STATUSES, parse_size_cell
 from .status import NullReporter, Reporter
 
 RUNS_DIR = STATE_DIR / "runs"
@@ -147,23 +147,63 @@ def move_ripped(ledger, run, run_id, queue_dir):
             rec["file"] = str(dest / src.name)
 
 
+def ripping_now(rows):
+    """True if PO-TRY's queue shows a job still ripping (someone else's, or ours)."""
+    return any((r.get("Status") or "").strip() in RIPPING_STATUSES for r in rows or [])
+
+
+def plan_and_hold(ledger, now, limits, save, log, quiet=False):
+    """Plan the queue; planner holds go straight into the ledger."""
+    runs, holds = plan(L.queued_sheets(ledger), now, limits)
+    for h in holds:
+        L.hold(ledger, [h.sheet.key], h.reason, now)
+        log(f"  {h.sheet.order} sheet {h.sheet.position}: held, {h.reason}")
+    if holds:
+        save()
+    if not quiet:
+        for r in runs:
+            log(f"Planned {r.planned_in:6.1f} in, {r.pictures} picture(s), {r.reason:7} "
+                f"{' '.join(r.orders)}")
+    return runs
+
+
+def pick(runs, force, log):
+    chosen = [r for r in runs if r.ready]
+    if not chosen and force and runs:
+        log("Nothing ready; --force takes the first run anyway.")
+        return runs[:1]
+    return chosen
+
+
 def cycle(cfg, ledger, driver, now, *, dl_names_fn, runs_dir=RUNS_DIR, save=lambda: None,
-          dry_run=False, force=False, max_runs=1, log=print, reporter=None):
+          dry_run=False, force=False, max_runs=1, log=print, reporter=None,
+          can_start=lambda: True, quiet=False):
     """One pass. driver needs .queue_rows() and .rip(pictures, planned_in, dry_run,
     on_progress). reporter (status.Reporter) gets every state change for the
     Pi dashboard. On a dry run the caller's ledger is left untouched.
-    Returns a summary dict."""
+
+    PO-TRY is only touched when a run is ready to rip, nobody is using the PC
+    (can_start), and PO-TRY isn't already ripping. People print from this PC,
+    so the agent stays out of PO-TRY otherwise. Returns a summary dict."""
     reporter = reporter or NullReporter()
     if dry_run:
         ledger = copy.deepcopy(ledger)
         save = lambda: None
     limits = Limits.from_config(cfg)
-    summary = {"ripped": [], "held": [], "by_hand": [], "dry_runs": [], "stopped": None}
-    reporter.update(state="planning")
+    summary = {"ripped": [], "held": [], "by_hand": [], "dry_runs": [], "stopped": None,
+               "waiting": None}
 
     def stopped(message, state="error"):
         summary["stopped"] = message
         reporter.update(state=state, current_run=None, last_error=message)
+
+    def done(waiting=None):
+        summary["waiting"] = waiting
+        if not summary["stopped"]:
+            reporter.update(state="idle", current_run=None)
+        summary["held"] = [k for k, r in ledger.items() if L.status(r) == L.HELD]
+        summary["by_hand"] = [k for k, r in ledger.items() if L.status(r) == L.BY_HAND]
+        return summary
 
     stuck = L.in_run_keys(ledger)
     if stuck:
@@ -171,27 +211,25 @@ def cycle(cfg, ledger, driver, now, *, dl_names_fn, runs_dir=RUNS_DIR, save=lamb
         log(f"Held {len(stuck)} sheet(s) left mid-run by an earlier cycle.")
         save()
 
+    if not L.queued_sheets(ledger):
+        return done("nothing queued")
+    chosen = pick(plan_and_hold(ledger, now, limits, save, log, quiet), force, log)
+    if not chosen:
+        return done("no run ready yet")
+    if not can_start():
+        return done("someone is using this PC")
+
+    reporter.update(state="planning")
+    rows = driver.queue_rows()
+    if ripping_now(rows):
+        log("PO-TRY is still ripping a job; waiting.")
+        return done("PO-TRY is busy ripping")
     own = own_job_names(runs_dir)
     queued = [s.key for s in L.queued_sheets(ledger)]
-    taken = apply_hand_check(ledger, queued, queue_job_names(driver.queue_rows(), own),
-                             dl_names_fn(), now, log)
-    if taken:
+    if apply_hand_check(ledger, queued, queue_job_names(rows, own), dl_names_fn(), now, log):
         save()
+        chosen = pick(plan_and_hold(ledger, now, limits, save, log), force, log)
 
-    runs, holds = plan(L.queued_sheets(ledger), now, limits)
-    for h in holds:
-        L.hold(ledger, [h.sheet.key], h.reason, now)
-        log(f"  {h.sheet.order} sheet {h.sheet.position}: held, {h.reason}")
-    if holds:
-        save()
-    for r in runs:
-        log(f"Planned {r.planned_in:6.1f} in, {r.pictures} picture(s), {r.reason:7} "
-            f"{' '.join(r.orders)}")
-
-    chosen = [r for r in runs if r.ready]
-    if not chosen and force and runs:
-        chosen = runs[:1]
-        log("Nothing ready; --force takes the first run anyway.")
     for n, run in enumerate(chosen[:max_runs], 1):
         keys = [i.sheet.key for i in run.items]
         if apply_hand_check(ledger, keys, queue_job_names(driver.queue_rows(), own),
@@ -259,11 +297,7 @@ def cycle(cfg, ledger, driver, now, *, dl_names_fn, runs_dir=RUNS_DIR, save=lamb
         reporter.update(current_run=None, last_error=None)
         log(f"Run {run_id} ripped: {' '.join(run.orders)}")
 
-    if not summary["stopped"]:
-        reporter.update(state="idle", current_run=None)
-    summary["held"] = [k for k, r in ledger.items() if L.status(r) == L.HELD]
-    summary["by_hand"] = [k for k, r in ledger.items() if L.status(r) == L.BY_HAND]
-    return summary
+    return done()
 
 
 # ---------------- PO-TRY side ----------------

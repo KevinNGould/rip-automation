@@ -37,6 +37,7 @@ from pathlib import Path
 
 from . import ledger as ledgers
 from .config import ConfigError, load_machine, load_or_exit, load_secrets
+from .lock import agent_running
 from .sheets import file_stem, print_ready_positions, safe_name, sheet_size
 
 MAX_PAGES = 10  # 50 orders per page
@@ -113,7 +114,7 @@ def get_token(cfg, secrets):
             return json.load(r)["access_token"]
     except urllib.error.HTTPError as e:
         # The response body can echo request details; report the status only.
-        sys.exit(f"Could not get a Shopify token (HTTP {e.code}).")
+        raise ShopifyError(f"Could not get a Shopify token (HTTP {e.code}).") from None
 
 
 class ShopifyError(Exception):
@@ -181,22 +182,21 @@ def sheets_from_orders(orders, shop_rules, line, min_order=0):
     return sheets
 
 
-def find_sheets(cfg, token, min_order):
-    """Return this machine's line items with a print-ready file, oldest order first."""
+def find_sheets(cfg, token, min_order, note=print):
+    """Return this machine's line items with a print-ready file, oldest order first.
+    Raises ShopifyError (and urllib errors) rather than exiting, so the agent
+    loop can log and try again later."""
     query = ORDERS_QUERY.replace("%NAMES%", NAME_FIELDS)
     orders, cursor = [], None
     for _ in range(MAX_PAGES):
         try:
             data = graphql(cfg, token, query, {"cursor": cursor})["orders"]
-        except ShopifyError as e:
+        except ShopifyError:
             if NAME_FIELDS not in query:
-                sys.exit(f"Shopify returned errors: {e}")
-            print("Note: this token can't read customer names; file names will leave them out.")
+                raise
+            note("Note: this token can't read customer names; file names will leave them out.")
             query = ORDERS_QUERY.replace("%NAMES%", "")
-            try:
-                data = graphql(cfg, token, query, {"cursor": cursor})["orders"]
-            except ShopifyError as e2:
-                sys.exit(f"Shopify returned errors: {e2}")
+            data = graphql(cfg, token, query, {"cursor": cursor})["orders"]
         orders += data["nodes"]
         if not data["pageInfo"]["hasNextPage"]:
             break
@@ -264,6 +264,33 @@ def ledger_record(sheet, path, now=None):
     }
 
 
+def download_new(cfg, ledger, sheets, *, limit=0, save=None, log=print):
+    """Download the sheets the ledger hasn't seen (and that have a file link),
+    adding each to the ledger as queued. One bad file doesn't stop the rest.
+    Returns the new ledger records."""
+    folder = Path(cfg["queue_dir"])
+    todo = [s for s in sheets if s["line_id"] not in ledger and s["url"]]
+    if limit:
+        todo = todo[:limit]
+    if todo:
+        log(f"Downloading {len(todo)} sheet(s) to {folder}")
+    added = []
+    for s in todo:
+        try:
+            path = download(s, folder)
+        except Exception as e:  # keep going on one bad file
+            log(f"  FAILED {s['order']}: {type(e).__name__}: {e}")
+            continue
+        rec = ledger_record(s, path)
+        ledger[s["line_id"]] = rec
+        (save or ledgers.save)(ledger)
+        added.append(rec)
+        length = (f"{rec['length_in']:.1f} in ({rec['length_source']})"
+                  if rec["length_in"] else "length unknown")
+        log(f"  ok  {s['order']} -> {path.name}   {length}")
+    return added
+
+
 # ---------- main ----------
 
 def main():
@@ -281,12 +308,17 @@ def main():
         floor = order_floor(args.min_order, cfg, args.download)
     except ConfigError as e:
         sys.exit(f"Not downloading: {e}.")
+    if (args.download or args.mark_done) and agent_running():
+        sys.exit("The agent loop is running and owns the ledger. Pause it first "
+                 "(tools\\pause.cmd) or let it fetch.")
     ledger = ledgers.load()
-    token = get_token(cfg, secrets)
     try:
+        token = get_token(cfg, secrets)
         sheets = find_sheets(cfg, token, floor)
     except ConfigError as e:
         sys.exit(f"machines.json: {e}")
+    except ShopifyError as e:
+        sys.exit(f"Shopify: {e}")
     new = [s for s in sheets if s["line_id"] not in ledger]
 
     from_note = f" from #{floor}" if floor else ""
@@ -318,23 +350,10 @@ def main():
         print("\nList only. Run with --download to fetch the NEW ones.")
         return
 
-    folder = Path(cfg["queue_dir"])
-    todo = [s for s in new if s["url"]]
-    if args.limit:
-        todo = todo[: args.limit]
-    print(f"\nDownloading {len(todo)} sheet(s) to {folder}")
-    for s in todo:
-        try:
-            path = download(s, folder)
-        except Exception as e:  # keep going on one bad file
-            print(f"  FAILED {s['order']}: {e}")
-            continue
-        rec = ledger_record(s, path)
-        ledger[s["line_id"]] = rec
-        ledgers.save(ledger)
-        length = (f"{rec['length_in']:.1f} in ({rec['length_source']})"
-                  if rec["length_in"] else "length unknown")
-        print(f"  ok  {s['order']} -> {path.name}   {length}")
+    print()
+    added = download_new(cfg, ledger, sheets, limit=args.limit)
+    if not added:
+        print("Nothing new to download.")
 
 
 if __name__ == "__main__":
