@@ -744,6 +744,25 @@ def close_agent_tabs(main, pid, keep=()):
     return closed
 
 
+def close_finished_tabs(main, pid):
+    """Right after a run is fully ripped (Kevin: too many open jobs make the
+    tab bar flaky): close the agent's job tabs, then go back to the RIP queue
+    view where people print. Skipped (and retried before the next run) if a
+    person is using the PC."""
+    if not tab_close_method() or not agent_tabs(pid):
+        return
+    try:
+        show_layout(main)
+        close_agent_tabs(main, pid)
+    except Stop as e:
+        log(f"  couldn't close the finished job's tab ({e}); trying again before the next run")
+    finally:
+        try:
+            show_queue(main)
+        except Stop:
+            pass
+
+
 def probe_tab_close(main, pid):
     """For Kevin, once: open a fresh empty job tab and find a way to close it.
     Saves the first method that works to state/potry_tab_close.json."""
@@ -1033,6 +1052,7 @@ def rip_pictures(main, pid, pictures, cfg, planned_in, dry_run,
             log("  pressed Cancel" + (" (dry run)" if dry_run else f": {gate}"))
             result["ended"] = datetime.now().isoformat(timespec="seconds")
             show_layout(main)
+            close_agent_tabs(main, pid)          # nothing ripped; its pictures needn't stay loaded
             return result
 
         press(print_btn, opens_dialog=True)
@@ -1052,8 +1072,8 @@ def rip_pictures(main, pid, pictures, cfg, planned_in, dry_run,
         result["job_name"] = actual_name        # what PO-TRY actually called it
     result["ended"] = datetime.now().isoformat(timespec="seconds")
     log(f"  rip done; queue size {result['row'].get('Size (inch)', '?')}")
+    close_finished_tabs(main, pid)
     # Left on the RIP queue view: that's where people print the job from.
-    # The next run switches back to the layout view itself.
     return result
 
 

@@ -94,6 +94,22 @@ class AgentTabs(unittest.TestCase):
         self.p.remember_tab(1234, "Job3")
         self.assertEqual(self.p.agent_tabs(5678), [])
 
+    def test_finished_run_closes_its_tab_then_back_to_queue_view(self):
+        p, calls = self.p, []
+        saved = (p.show_layout, p.show_queue, p.close_agent_tabs)
+        p.show_layout = lambda main: calls.append("layout")
+        p.show_queue = lambda main: calls.append("queue")
+        p.close_agent_tabs = lambda main, pid, keep=(): calls.append("close")
+        try:
+            p.remember_tab(1234, "Job30")
+            p.close_finished_tabs(main=None, pid=1234)      # no proven method: untouched
+            self.assertEqual(calls, [])
+            p.TAB_CLOSE_PATH.write_text('{"method": "x_button", "x_offset": 12}')
+            p.close_finished_tabs(main=None, pid=1234)
+            self.assertEqual(calls, ["layout", "close", "queue"])
+        finally:
+            p.show_layout, p.show_queue, p.close_agent_tabs = saved
+
     def test_nothing_closed_until_a_method_is_proven(self):
         self.p.remember_tab(1234, "Job13")
         self.assertIsNone(self.p.tab_close_method())
