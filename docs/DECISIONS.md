@@ -18,6 +18,14 @@ Newest first. Claude (chat) keeps this file; Claude Code adds entries when it de
 **Proven in the trial**
 - #47918 fetched and ripped hands-free, about 30 s from New to "RIP finished". See `trial/`.
 
+**Incident (Code, 10:41–10:43): backlog downloaded by mistake**
+- While adding the `start_from_order` guard to `fetch --download`, Code ran `fetch --download` to see the guard refuse. The edit had silently failed to apply, so the old code ran with no floor and downloaded 20 sheets from the backlog, plus part of a 21st, before Code killed it. **Nothing was ripped; PO-TRY wasn't touched.**
+- Sheets downloaded: #43227, #47347, #47435, #47497, #47538, #47541, #47552, #47615, #47704, #47749, #47768, #47771, #47775, #47799, #47806, #47814, #47860, #47862 (both sheets), #47874. #47887 was cut off partway (the `.part` file).
+- **Side effect:** downloading through `_Print Ready File` flips the app's Downloaded counter. Those orders probably now show **1/1** in the Unfulfilled tab even if nobody printed them, and #47887 may too. That makes the "oldest order still at 1/0" reading for `start_from_order` unreliable for anything up to #47887.
+- Contained: all 21 files moved to `C:\Users\kevin\Downloads\8color-hold-accidental-20261015` (nothing deleted). Their ledger entries are `held`, with the reason, so nothing will plan or re-download them. The queue folder is empty apart from `ripped\`.
+- Rule from now on: Code never runs `fetch --download` (or anything that downloads, rips or prints) to test something. Guards get unit tests; live commands are list-only unless Kevin asks.
+- **Kevin to decide:** which of those orders still need printing. The files are ready in the hold folder if any do.
+
 **Decided (Code, applying the 10:xx answers to steps 1–3)**
 - **Q1, how "when they fit" is read:** the same way as rule 2 for orders. A sheet's copies split only when **all copies together exceed the cap**, so they could never share one run; then they go one copy at a time into consecutive runs. If the copies fit under the cap together but not in the current run's remaining room, the whole sheet moves to the next run rather than leaving some copies behind. Example: 3 × 300 in is split (copies 1–2 plus other work in run 1, copy 3 in run 2); 3 × 100 in after a 500 in sheet moves whole to run 2. If Kevin would rather fill the current run with some copies and move the rest, that's a small change to `_units`/packing; say so.
 - Width: copies stack lengthwise on the 23 in canvas, and 22.1–22.5 in sheets can't sit side by side, so "overrunning" means run length, as chat read it. Nothing in the code suggests otherwise. `max_width_in` = 23 is in `machine.json` and the example.
