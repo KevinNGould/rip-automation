@@ -18,7 +18,19 @@ Newest first. Claude (chat) keeps this file; Claude Code adds entries when it de
 **Proven in the trial**
 - #47918 fetched and ripped hands-free, about 30 s from New to "RIP finished". See `trial/`.
 
-**Found and fixed (Code, ~12:30): OCR misread on the first live agent dry run**
+**Proven (11:36): first real multi-sheet rip by the agent**
+- `python -m ripauto.agent --once --force` (Kevin, admin prompt) on #47946 (121.2 in) + #47947 (13.2 in):
+  - hand check, multi-add of 2 files, F3
+  - preview OCR 22.5 × 135.4 against 135.4 planned, gate ok
+  - Print in the preview, then "Ripping 41…87" → "RIP finished 100" in ~35 s
+  - queue size `22.500×135.400`
+- Ledger: both `ripped` (1/1 copies, run `8color-1-20261015-113554`); files moved to `ripped\8color-1-20261015-113554\`.
+- The run record has planned 135.4, preview 135.4, actual 135.4, **measured gap 1.0 in** (= `gap_in`).
+- The agent's own job is now recognized by the hand check.
+- Nothing was printed. Printing stays with people, from PO-TRY's RIP queue.
+- **SPEC §12 step 4 is done.** Code stops here and checks in before step 5 (heartbeat + Pi dashboard).
+
+**Found and fixed (Code, between 11:30 and 11:34): OCR misread on the first live agent dry run**
 - Kevin's `agent --once --dry-run --force` on #47946 + #47947 (135.4 in planned) worked end to end:
   - hand check, plan, multi-add of 2 files, F3, RIP, preview, Cancel
   - ledger untouched
@@ -33,7 +45,7 @@ Newest first. Claude (chat) keeps this file; Claude Code adds entries when it de
 - **Re-checked on all four previews captured so far** (Kevin's screenshot, both 3-sheet dry runs, this run): all read correctly (22.5 × 65.237 three times, 22.5 × 135.4). 131 tests pass.
 - Safety net unchanged: even a "clean" misread has to land within max(3 in, 1%) of the planned length and under the cap, or the run is cancelled.
 
-**Decided (Kevin, ~11:55): go-live floor**
+**Decided (Kevin, ~11:2x, before the 11:29 dry run): go-live floor**
 - Kevin has no undownloaded 8-color orders; the last one in, **#47942**, he already grabbed by hand. So **`start_from_order` = 47943**, set in `machine.json` on the 8-color PC. List-only fetch from #47943 shows 0 sheets, so nothing is waiting.
 - Hand check verified on real hand downloads: #47932, #47935, #47940 and #47942 all come back **by_hand** against Kevin's Downloads folder (read-only check). #47932 and #47935 were "free" at the 11:xx check, before Kevin downloaded them.
 - The first real multi-sheet rip has to wait for new 8-color orders at #47943 or above. For that first test, **nobody hand-downloads them**. If someone does, the hand check skips them (safe), but there's then nothing to test on.
@@ -45,7 +57,7 @@ Newest first. Claude (chat) keeps this file; Claude Code adds entries when it de
 - **The W/H "loaded" check proves nothing.** In the one-at-a-time run the boxes stayed on the first picture (H 45.780) for all three adds. So the OCR length is the real check that every picture loaded, and the gate is now **tight both ways**: cancel if the preview length is off from planned by more than max(3 in, 1%). The smallest sheet is about 8 in including its gap, so a missing or doubled picture is caught. Measured today: planned 65.197, preview 65.237 (0.04 in apart). If real runs show F3 spacing varies more than this, the tolerance needs loosening; run records keep the numbers.
 - PO-TRY names a job after whichever picture comes first, which with multi-add may not be the first in the agent's list. The queue row is matched against every picture's name, and the run record keeps the name PO-TRY actually used.
 
-**Decided (Kevin + Code, 11:3x): length gate reads the preview by OCR (option A), with the post-rip check (B) as a backstop**
+**Decided (Kevin + Code, ~11:1x, before the 11:16 dry runs): length gate reads the preview by OCR (option A), with the post-rip check (B) as a backstop**
 - Kevin's screenshot of the 3-sheet preview shows **`22.500 inch`** across the top and **`65.237 inch`** sideways down the left edge of the picture area, with all three sheets drawn. Length is the one that matters.
 - The driver captures the preview's picture area (`QGraphicsView`, a screenshot only) and runs Windows' built-in OCR (`tools/ocr_image.ps1`, en-US engine already on the 8-color PC). The image as-is gives the width; turned 90° counter-clockwise, it gives the length. On Kevin's screenshot, OCR returned exactly `22.500 inch` and `65.237 inch`. Gate rule: anything other than exactly one "N inch" in each pass is unreadable → Cancel and hold. OCR inputs are kept in `state/previews/` for checking.
 - **Backstop:** after the rip, the queue row's `Size (inch)` is checked. If it's over `cap_in`, the run is held with "delete it from the RIP queue by hand, don't print it". The agent never touches the queue toolbar.
@@ -135,13 +147,13 @@ Newest first. Claude (chat) keeps this file; Claude Code adds entries when it de
 - Replace the borrowed Pi paperwork-printer token with a dedicated Shopify app (read_orders, read_customers, Name access).
 - ~~(Code) "Matches two machines → refuse" can't be fully checked~~ settled: `config/machines.json`, built (see Code entry above).
 - ~~(Code) Printable width for 8-color?~~ settled: 23 in.
-- ~~(Code) DECISION NEEDED: length gate~~ settled 11:3x: OCR on the preview + post-rip backstop (see above). Was: **how to check run length before confirming the rip** (SPEC §7 step 6 can't be done through automation; see "Found" above). Options:
+- ~~(Code) DECISION NEEDED: length gate~~ settled ~11:1x: OCR on the preview + post-rip backstop (see above). Was: **how to check run length before confirming the rip** (SPEC §7 step 6 can't be done through automation; see "Found" above). Options:
   - **A. Windows OCR on the preview.** Take a screenshot of the preview's picture area and read it with Windows' built-in OCR. The en-US engine is present on the 8-color PC and Pillow is installed. This only works **if the preview actually draws "22.500 inch × 601.001 inch" somewhere**, which is unconfirmed. Code can check without risk: Kevin pauses a dry run at the preview, Code takes a screenshot and OCRs it (read-only), Kevin presses Enter, and the run Cancels.
   - **B. Rip, then check.** After Print, the queue row's `Size (inch)` (e.g. `22.500×601.001`) is readable. If it's over the cap, the agent holds the run and flags "delete this job from the RIP queue by hand"; it never touches the queue toolbar. Weaker: an over-cap job sits ripped in the queue until someone deletes it.
   - **C. Trust the planner with margin.** Calibrate `gap_in` from real runs, and plan to a lower ceiling (e.g. 640) so real length stays under 650. Use B as the backstop.
 
   Code recommends **A if the text is there, plus B always** (B also gives the numbers to calibrate `gap_in`). If the preview has no size text, then **C + B**.
-- (Code) **UV sheets would route to the CMYK line (found ~12:00, read-only check of 45 unfulfilled orders from #47900).** The shop's four DTF products are:
+- (Code) **UV sheets would route to the CMYK line (found ~11:2x, read-only check of 45 unfulfilled orders from #47900).** The shop's four DTF products are:
   - `DTF (4 Color CMYK) - Gang Sheet Builder - INSTA Peel Film` (28 items)
   - `DTF (4 Color CMYK) - Image by Size - INSTA Peel Film` (8 items)
   - `DTF Color-Pro (8 Color CMYK+RGBO) - Gang Sheet Builder - INSTA Peel Film` (9 items)
