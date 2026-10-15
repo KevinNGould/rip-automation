@@ -2,31 +2,28 @@
 
 Claude Code rewrites this file at the end of every working session and pushes it. Chat reads this file first. Decisions and open questions live in `docs/DECISIONS.md`; the spec lives in `docs/SPEC.md`. Git history holds older versions of this file.
 
-**Last updated:** 2026-10-15 ~11:40, OCR length gate built; waiting on Kevin's live check · **HEAD:** see `git log -1`
+**Last updated:** 2026-10-15 ~11:50, OCR gate and multi-add verified live; waiting on `start_from_order` · **HEAD:** see `git log -1`
 
-## Latest (11:40): read this first
+## Latest (11:50): read this first
 
-- **Length gate settled:** Kevin's screenshot showed the preview draws `22.500 inch` (width) and `65.237 inch` (length, sideways). The driver now screenshots the preview's picture area and reads it with Windows' built-in OCR; on Kevin's screenshot it read exactly 22.500 × 65.237. A post-rip check of the queue row's size is the backstop. `gap_in` is now 1.0 (measured 1.02). Details: DECISIONS.md, 11:3x entry.
-- **Not yet seen live:** the capture inside PO-TRY, and whether multi-add loaded all three (the screenshot came from the one-at-a-time run). Both are checked by Kevin's two dry runs below.
-- Tests: 124, all passing (including a real Windows OCR test on a drawn stand-in preview).
+- **Verified live in PO-TRY (Kevin, 11:16–11:17):**
+  - The OCR gate read `(22.5, 65.237)` against 65.2 in planned on both 3-sheet dry runs.
+  - Multi-add loaded all three files in one Add, since the length was the same.
+  - F3 lands.
+- **Changes since:**
+  - The gate now cancels if the preview length is off from planned by more than max(3 in, 1%) either way, which catches a missing or doubled picture.
+  - The agent uses multi-add by default, in chunks of 10 with a one-at-a-time fallback.
+  - The queue row is matched by any picture's name.
+- Tests: 127, all passing.
+- **Step 4's PO-TRY side is done apart from a real rip.** Still open: closing job tabs (a dozen are piled up) and the picture count (covered by the tight length gate).
 
-### Kevin: two dry runs (one administrator Command Prompt is enough)
+### Path to the first real multi-sheet rip
 
-**Setup:** open an administrator Command Prompt and run `cd C:\Users\kevin\projects\rip-automation`. PO-TRY open and maximized.
-
-**Step 1: one-at-a-time dry run, now with the OCR gate**
-1. Run: `python -m ripauto.potry --dry-run --batch --folder C:\Users\kevin\Downloads\8color-dryrun`
-2. Hands off. It ends with Cancel and "All done."
-3. Look for this line near the end: `preview size: (22.5, 65.237)   planned 65.2 in   gate: ok`
-
-**Step 2: same, adding all three in one Add**
-1. Run: `python -m ripauto.potry --dry-run --batch --folder C:\Users\kevin\Downloads\8color-dryrun --try-multi-add`
-2. Hands off. It ends with Cancel.
-3. If the preview size again reads about 65.2, multi-add loaded all three and the agent can use it.
-
-**Step 3: tell Code "done"**, plus the `start_from_order` number if you have it. Code reads the log and the saved OCR images from disk.
-
-Nothing in these steps prints or rips; both end with Cancel.
+1. **Kevin:** give `start_from_order` (oldest 8-color order still at 1/0 in the app's Unfulfilled tab).
+2. **Code:** sets it in `machine.json`, then runs `fetch` **list-only** and `agent --plan` to show what would be downloaded and how it would batch. No downloads yet.
+3. **Kevin's go-ahead → Code:** `python -m ripauto.fetch --download` (downloads from the floor up; this ticks the app's counters for those orders).
+4. **Kevin, admin prompt:** `python -m ripauto.agent --once --dry-run --force`. This runs the hand check, plans, loads the first run, reads the preview and presses Cancel; the ledger stays untouched.
+5. **Kevin's go-ahead, admin prompt:** `python -m ripauto.agent --once --force`. This is the first real run: it rips (never prints), records the run, and moves the files to `ripped\{run-id}\`.
 
 ---
 
@@ -35,10 +32,10 @@ Nothing in these steps prints or rips; both end with Cancel.
 | SPEC §12 step | State |
 |---|---|
 | 1–3 | **Done** |
-| 4. Driver multi-file runs + length gate + hand-download check + `start_from_order` | **Code done and unit-tested. 3-sheet batch dry run passed (11:05).** OCR length gate built (11:40); live check pending (Kevin, above). No real rip yet. |
+| 4. Driver multi-file runs + length gate + hand-download check + `start_from_order` | **Code done; dry runs pass live, including the OCR gate and multi-add (11:17).** No real rip yet: waiting on `start_from_order`, then the path above. |
 | 5–8 | Not started |
 
-Tests: `python -m unittest` from the repo root runs 124 tests, all passing.
+Tests: `python -m unittest` from the repo root runs 127 tests, all passing.
 
 Earlier today: the 10:41 incident (backlog downloaded by mistake) is resolved. Those orders were already printed by hand; details are in DECISIONS.md.
 
@@ -75,14 +72,9 @@ Earlier today: the 10:41 incident (backlog downloaded by mistake) is resolved. T
 
 ## Earlier Kevin checks (done)
 
-- 11:05: the probe dry run and the multi-add experiment are done; findings are in DECISIONS.md. `C:\Users\kevin\Downloads\8color-dryrun` holds copies of three already-printed sheets (#47862 48 in, #47874 6 in, #47918 12 in) for dry runs.
-
-**Still needed:** the `start_from_order` number (oldest 8-color order still at 1/0 in the app's Unfulfilled tab).
-
-**After the live OCR check passes, with Kevin's go-ahead** (not yet):
-- `python -m ripauto.fetch --download` (with the floor set)
-- `python -m ripauto.agent --once --dry-run --force`
-- then one real `python -m ripauto.agent --once --force`
+- 11:05: the probe dry run and the first multi-add attempt.
+- 11:16–11:17: live OCR gate plus multi-add dry runs, both passed.
+- `C:\Users\kevin\Downloads\8color-dryrun` holds copies of three already-printed sheets (#47862 48 in, #47874 6 in, #47918 12 in) for dry runs.
 
 ## Needs a decision / tidy (DECISIONS.md → Open)
 

@@ -18,6 +18,13 @@ Newest first. Claude (chat) keeps this file; Claude Code adds entries when it de
 **Proven in the trial**
 - #47918 fetched and ripped hands-free, about 30 s from New to "RIP finished". See `trial/`.
 
+**Verified live (Kevin, 11:16–11:17) and decided (Code)**
+- **OCR gate works inside PO-TRY.** Both 3-sheet dry runs logged `preview size: (22.5, 65.237)   planned 65.2 in   gate: ok`, then Cancel.
+- **Multi-file Add works.** With all three files in one Add, the preview read the same 65.237 in, so all three loaded. The agent now uses it by default (`multi_add`, chunks of 10 files per dialog). If the dialog ever refuses, the rest go in one at a time in the same job.
+- **F3 lands.** In the multi-add run the selected picture moved from Y 52.98 to 46.78 when F3 ran, and both runs gave the same stacked 65.237 in layout. This closes the "confirm F3" open item.
+- **The W/H "loaded" check proves nothing.** In the one-at-a-time run the boxes stayed on the first picture (H 45.780) for all three adds. So the OCR length is the real check that every picture loaded, and the gate is now **tight both ways**: cancel if the preview length is off from planned by more than max(3 in, 1%). The smallest sheet is about 8 in including its gap, so a missing or doubled picture is caught. Measured today: planned 65.197, preview 65.237 (0.04 in apart). If real runs show F3 spacing varies more than this, the tolerance needs loosening; run records keep the numbers.
+- PO-TRY names a job after whichever picture comes first, which with multi-add may not be the first in the agent's list. The queue row is matched against every picture's name, and the run record keeps the name PO-TRY actually used.
+
 **Decided (Kevin + Code, 11:3x): length gate reads the preview by OCR (option A), with the post-rip check (B) as a backstop**
 - Kevin's screenshot of the 3-sheet preview shows **`22.500 inch`** across the top and **`65.237 inch`** sideways down the left edge of the picture area, with all three sheets drawn. Length is the one that matters.
 - The driver captures the preview's picture area (`QGraphicsView`, a screenshot only) and runs Windows' built-in OCR (`tools/ocr_image.ps1`, en-US engine already on the 8-color PC). The image as-is gives the width; turned 90° counter-clockwise, it gives the length. On Kevin's screenshot, OCR returned exactly `22.500 inch` and `65.237 inch`. Gate rule: anything other than exactly one "N inch" in each pass is unreadable → Cancel and hold. OCR inputs are kept in `state/previews/` for checking.
@@ -104,7 +111,7 @@ Newest first. Claude (chat) keeps this file; Claude Code adds entries when it de
 - Q4 Is 30 min the right flush wait?
 - Q5 UV DTF product titles; caps and targets for CMYK and UV.
 - Q6 Computer (host) names for each of the five printer PCs.
-- Confirm the driver's F3 keypress actually lands.
+- ~~Confirm the driver's F3 keypress actually lands.~~ Confirmed 11:17 (see "Verified live").
 - Replace the borrowed Pi paperwork-printer token with a dedicated Shopify app (read_orders, read_customers, Name access).
 - ~~(Code) "Matches two machines → refuse" can't be fully checked~~ settled: `config/machines.json`, built (see Code entry above).
 - ~~(Code) Printable width for 8-color?~~ settled: 23 in.
@@ -115,7 +122,7 @@ Newest first. Claude (chat) keeps this file; Claude Code adds entries when it de
 
   Code recommends **A if the text is there, plus B always** (B also gives the numbers to calibrate `gap_in`). If the preview has no size text, then **C + B**.
 - (Code) **Job tabs pile up** (one New per run, SPEC §7). Closing the run's tab isn't built yet; it needs a probe of the tab's close control.
-- (Code) **Multi-file Add:** the dialog accepted three names in one go (see "Found"). Kevin: did three pictures show on the canvas in that run? If yes, the agent switches to one Add per run, plus single Adds for extra copies.
+- ~~(Code) Multi-file Add~~ confirmed 11:17 by the OCR length; now the default.
 - (Code) **SPEC wording to tidy:** §3's config-split bullet still lists "label, product rules" under `machine.json`, and §4 says "Product rules come from `machine.json`". Both contradict §2 (rules live in `machines.json`). Code follows §2.
 - ~~(Code) Backlog cutoff~~ settled 10:31, see above. Was: **Backlog cutoff before go-live (step 6).** The live list shows 26 unhandled 8-color sheets on unfulfilled orders, going back to #43227. Most were presumably printed by hand already. Before the agent runs unattended, we need either `fetch --mark-done` (optionally with `--from`) or a `start_from_order` setting. Also #47914 was hand-downloaded during the verification, but the agent's ledger still shows it as new.
 
