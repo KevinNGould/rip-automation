@@ -32,6 +32,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .config import STATE_DIR, ConfigError, load_machine, load_or_exit, load_secrets
+from .sheets import file_stem, print_ready_positions, safe_name, sheet_size
 
 LEDGER_PATH = STATE_DIR / "processed.json"
 MAX_PAGES = 10  # 50 orders per page
@@ -142,11 +143,42 @@ def customer_name(order):
     return ""
 
 
+def sheets_from_orders(orders, rules, min_order=0):
+    """This machine's line items from GraphQL order nodes, oldest order first."""
+    rules = [r for r in rules if r["kind"] in ENABLED_KINDS]
+    sheets = []
+    for order in orders:
+        num = int(re.sub(r"\D", "", order["name"]) or 0)
+        if min_order and num < min_order:
+            continue
+        lines = order["lineItems"]["nodes"]
+        positions = print_ready_positions(lines)
+        for li in lines:
+            if not match_rule(li["title"], rules):
+                continue
+            attrs = {a["key"]: a["value"] for a in li["customAttributes"]}
+            sheets.append({
+                "order": order["name"],
+                "order_num": num,
+                "order_id": order.get("legacyResourceId", ""),
+                "created_at": order.get("createdAt", ""),
+                "customer": customer_name(order),
+                "line_id": li["id"].rsplit("/", 1)[-1],
+                "position": positions.get(li["id"], 0),
+                "size": li["variantTitle"] or "",
+                "qty": li["quantity"],
+                "url": attrs.get("_Print Ready File"),
+                "actual_height": attrs.get("_Actual Height"),
+                "low_res": attrs.get("_Has Low Resolution", "").lower() == "yes",
+            })
+    sheets.sort(key=lambda s: (s["order_num"], s["position"], s["line_id"]))
+    return sheets
+
+
 def find_sheets(cfg, token, min_order):
     """Return this machine's line items with a print-ready file, oldest order first."""
-    rules = [r for r in cfg["product_rules"] if r["kind"] in ENABLED_KINDS]
     query = ORDERS_QUERY.replace("%NAMES%", NAME_FIELDS)
-    sheets, cursor = [], None
+    orders, cursor = [], None
     for _ in range(MAX_PAGES):
         try:
             data = graphql(cfg, token, query, {"cursor": cursor})["orders"]
@@ -159,51 +191,19 @@ def find_sheets(cfg, token, min_order):
                 data = graphql(cfg, token, query, {"cursor": cursor})["orders"]
             except ShopifyError as e2:
                 sys.exit(f"Shopify returned errors: {e2}")
-        for order in data["nodes"]:
-            num = int(re.sub(r"\D", "", order["name"]) or 0)
-            if min_order and num < min_order:
-                continue
-            for li in order["lineItems"]["nodes"]:
-                if not match_rule(li["title"], rules):
-                    continue
-                attrs = {a["key"]: a["value"] for a in li["customAttributes"]}
-                url = attrs.get("_Print Ready File")
-                sheets.append({
-                    "order": order["name"],
-                    "order_num": num,
-                    "order_id": order.get("legacyResourceId", ""),
-                    "customer": customer_name(order),
-                    "line_id": li["id"].rsplit("/", 1)[-1],
-                    "size": li["variantTitle"] or "",
-                    "qty": li["quantity"],
-                    "url": url,
-                    "low_res": attrs.get("_Has Low Resolution", "").lower() == "yes",
-                })
+        orders += data["nodes"]
         if not data["pageInfo"]["hasNextPage"]:
             break
         cursor = data["pageInfo"]["endCursor"]
-    sheets.sort(key=lambda s: (s["order_num"], s["line_id"]))
-    return sheets
+    return sheets_from_orders(orders, cfg["product_rules"], min_order)
 
 
 # ---------- download ----------
 
-def safe_name(text):
-    """Strip only what Windows forbids in file names; keep spaces and ( )."""
-    text = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "", text)
-    return re.sub(r"\s+", " ", text).strip().rstrip(".")
-
-
 def built_name(sheet):
-    """Same pattern Build a Gang Sheet uses:
-    order-Customer-orderID-size-qty-(1), e.g.
-    47918-Kaitlyn Carter-18943728582971-22in x 12in 1ft-1-(1)
-    The app also puts the customer's design name before (1); Shopify doesn't
-    have that, so it's left out here."""
-    size = sheet["size"].replace("/", "-").replace("(", "").replace(")", "")
-    parts = [str(sheet["order_num"]), sheet["customer"], sheet["order_id"],
-             size, str(sheet["qty"]), "(1)"]
-    return safe_name("-".join(p for p in parts if p))
+    """The Build a Gang Sheet app's file name for this sheet (see sheets.file_stem)."""
+    return file_stem(sheet["order_num"], sheet["customer"], sheet["order_id"],
+                     sheet["size"], sheet["position"], sheet["qty"])
 
 
 def download(sheet, folder):
@@ -235,6 +235,27 @@ def download(sheet, folder):
     return dest
 
 
+def ledger_record(sheet, path, now=None):
+    """What the ledger keeps per downloaded sheet (SPEC §4)."""
+    size = sheet_size(path, {"_Actual Height": sheet.get("actual_height")}, sheet["size"])
+    rnd = lambda v: round(v, 3) if v else None
+    return {
+        "order": sheet["order"],
+        "order_num": sheet["order_num"],
+        "line_id": sheet["line_id"],
+        "position": sheet["position"],
+        "qty": sheet["qty"],
+        "size": sheet["size"],
+        "length_in": rnd(size["length_in"]),
+        "length_source": size["length_source"],
+        "width_in": rnd(size["width_in"]),
+        "width_source": size["width_source"],
+        "low_res": sheet["low_res"],
+        "file": str(path),
+        "fetched_at": (now or datetime.now()).isoformat(timespec="seconds"),
+    }
+
+
 # ---------- main ----------
 
 def main():
@@ -263,6 +284,8 @@ def main():
             flags.append("LOW-RES")
         if s["qty"] > 1:
             flags.append(f"QTY {s['qty']}")
+        if s["position"] > 1:
+            flags.append(f"SHEET {s['position']} OF ORDER")
         if not s["url"]:
             flags.append("NO FILE LINK")
         print(f"  {status:4}  {s['order']:8} {s['size']:22} {'  '.join(flags)}")
@@ -290,14 +313,12 @@ def main():
         except Exception as e:  # keep going on one bad file
             print(f"  FAILED {s['order']}: {e}")
             continue
-        ledger[s["line_id"]] = {
-            "order": s["order"],
-            "file": str(path),
-            "low_res": s["low_res"],
-            "downloaded_at": datetime.now().isoformat(timespec="seconds"),
-        }
+        rec = ledger_record(s, path)
+        ledger[s["line_id"]] = rec
         save_ledger(ledger)
-        print(f"  ok  {s['order']} -> {path.name}")
+        length = (f"{rec['length_in']:.1f} in ({rec['length_source']})"
+                  if rec["length_in"] else "length unknown")
+        print(f"  ok  {s['order']} -> {path.name}   {length}")
 
 
 if __name__ == "__main__":
