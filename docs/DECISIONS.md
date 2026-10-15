@@ -18,6 +18,13 @@ Newest first. Claude (chat) keeps this file; Claude Code adds entries when it de
 **Proven in the trial**
 - #47918 fetched and ripped hands-free, about 30 s from New to "RIP finished". See `trial/`.
 
+**Incident (Code, step 5): Shopify token printed into the Code transcript**
+- GitHub's secret scanning blocked a push because the leak test held a made-up `shpat_…` literal. The fake token is now built at runtime, and that push went through.
+- While checking the repo for other token-shaped strings, Code ran a plain `grep -r` over the working folder. It matched the git-ignored `config/secrets.json` and **printed the real (borrowed, shared) Shopify token into the Code session transcript**.
+- **Not committed, not pushed:** `secrets.json` is git-ignored and appears in no commit (checked with `git log --all`).
+- **Kevin to decide:** treat the token as exposed and rotate it? It's shared with the hub, the scanners, the paperwork printer and the tracker, so rotating it touches all of them. The dedicated Shopify app (SPEC §10, step 7) would give this system its own credential and end the sharing.
+- Rule from now on: secret checks use `git grep` (tracked files only), and nothing reads or prints `secrets.json`.
+
 **Proven (11:36): first real multi-sheet rip by the agent**
 - `python -m ripauto.agent --once --force` (Kevin, admin prompt) on #47946 (121.2 in) + #47947 (13.2 in):
   - hand check, multi-add of 2 files, F3
