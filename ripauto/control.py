@@ -157,7 +157,7 @@ def rip_now():
 
 def request_restart():
     """Ask the agent to restart at its next safe point (to load new code).
-    Task Scheduler starts it again about a minute later."""
+    It starts itself again through Task Scheduler a few seconds later."""
     RESTART_PATH.parent.mkdir(parents=True, exist_ok=True)
     RESTART_PATH.write_text("from the RIP Agent window\n", encoding="utf-8")
 

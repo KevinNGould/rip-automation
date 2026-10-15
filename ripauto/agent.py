@@ -34,6 +34,7 @@ import argparse
 import copy
 import json
 import shutil
+import subprocess
 import sys
 import threading
 import time
@@ -57,7 +58,7 @@ ERROR_BACKOFF_S = 60
 COUNTDOWN = "rip warning countdown"
 BUSY = "PO-TRY is busy ripping"
 RESTART_PATH = STATE_DIR / "RESTART"     # RIP Agent window "Restart agent" (picks up new code)
-RESTART_EXIT_CODE = 3
+TASK_NAME = "OSS RIP Agent"
 
 
 class Stop(Exception):
@@ -431,13 +432,13 @@ def run_loop(cfg, ledger, driver, *, fetcher, dl_names_fn, reporter, save, log,
 
     while not stop.is_set():
         if restart_path.exists() and not gate.active:
-            # Safe point: between cycles, no countdown. Exit non-zero so Task
-            # Scheduler restarts us (a minute later) with any new code.
+            # Safe point: between cycles, no countdown. Stop here;
+            # main() then relaunches the scheduled task with any new code.
             try:
                 restart_path.unlink()
             except OSError:
                 pass
-            log("Restart requested: stopping now; Task Scheduler starts the agent again in about a minute.")
+            log("Restart requested: stopping now and starting again in a few seconds.")
             reporter.update(state="stopped", current_run=None)
             return "restart"
         if pause_path.exists():
@@ -584,7 +585,21 @@ def main():
         reporter.stop("stopped")
         lock.__exit__(None, None, None)
     if result == "restart":
-        sys.exit(RESTART_EXIT_CODE)       # non-zero: Task Scheduler's restart-on-failure kicks in
+        relaunch_via_task_scheduler(log)
+
+
+def relaunch_via_task_scheduler(log, task=TASK_NAME):
+    """Start the scheduled task again a few seconds after this process exits.
+    (Task Scheduler's "restart on failure" only covers a task that fails to
+    start, not one that exits with an error code: found 2026-10-15 13:09.)
+    A detached cmd waits 5 s, so our lock is gone, then runs the task."""
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "DETACHED_PROCESS", 0)
+    try:
+        subprocess.Popen(["cmd", "/c", f'timeout /t 5 /nobreak >nul & schtasks /run /tn "{task}"'],
+                         creationflags=flags, close_fds=True)
+        log("Relaunching through Task Scheduler in about 5 seconds.")
+    except OSError as e:
+        log(f"Couldn't relaunch ({e}); start it from the RIP Agent window.")
 
 
 if __name__ == "__main__":

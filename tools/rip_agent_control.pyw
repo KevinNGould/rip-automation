@@ -150,7 +150,7 @@ class App:
     def do_restart(self):
         control.request_restart()
         self.note.configure(text="Restart requested. It stops at the next safe point (never mid-run) "
-                                 "and Task Scheduler starts it again about a minute later.")
+                                 "and starts itself again a few seconds later.")
         self.update_once()
 
     def open_dashboard(self):
