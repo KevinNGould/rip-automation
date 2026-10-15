@@ -13,8 +13,9 @@ CFG = {"machine_id": "8color-1", "cap_in": 650, "target_in": 600, "window_in": 4
 
 
 class FakeDriver:
-    def __init__(self, rows=(), gate=None, fail=None, size=None):
+    def __init__(self, rows=(), gate=None, fail=None, size=None, row_size="22.500×600.000"):
         self.rows, self.gate, self.fail, self.size = list(rows), gate, fail, size
+        self.row_size = row_size
         self.calls = []
 
     def queue_rows(self):
@@ -25,7 +26,7 @@ class FakeDriver:
         if self.fail:
             raise Stop(self.fail)
         return {"job_name": pictures[0].stem, "preview": self.size or (22.5, planned_in),
-                "gate": self.gate, "row": None if dry_run else {"Size (inch)": "22.500×600.000"},
+                "gate": self.gate, "row": None if dry_run else {"Size (inch)": self.row_size},
                 "started": "s", "ended": "e"}
 
 
@@ -194,6 +195,26 @@ class Cycle(unittest.TestCase):
         summary, _ = self.env.run(FakeDriver())
         self.assertEqual(L.status(self.env.ledger["a"]), L.HELD)
         self.assertIn("missing", summary["stopped"])
+
+    def test_ripped_job_over_cap_is_flagged_for_deletion(self):
+        self.env.add("a", 47930, 600.0)
+        summary, _ = self.env.run(FakeDriver(row_size="22.500×651.200"))
+        self.assertEqual(summary["ripped"], [])
+        self.assertEqual(L.status(self.env.ledger["a"]), L.HELD)
+        self.assertIn("delete it from the RIP queue by hand", self.env.ledger["a"]["hold_reason"])
+        self.assertEqual(self.env.ledger["a"]["copies_ripped"], 1)     # it was ripped
+        [rec] = [json.loads(p.read_text()) for p in self.env.runs.glob("*.json")]
+        self.assertEqual(rec["outcome"], "over_cap")
+
+    def test_run_record_measures_gap(self):
+        # Kevin's 3-sheet dry run: 45.74 + 7.2 + 10.257 in of artwork, preview 65.237 in.
+        self.env.add("a", 47862, 45.74)
+        self.env.add("b", 47874, 7.2)
+        self.env.add("c", 47918, 10.257, waited_min=40)
+        self.env.run(FakeDriver(row_size="22.500×65.237"))
+        [rec] = [json.loads(p.read_text()) for p in self.env.runs.glob("*.json")]
+        self.assertEqual(rec["actual_in"], 65.237)
+        self.assertAlmostEqual(rec["gap_measured_in"], 1.02, places=2)
 
     def test_two_runs_in_one_cycle_get_distinct_ids(self):
         self.env.add("a", 47930, 600.0)

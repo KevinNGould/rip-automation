@@ -9,7 +9,7 @@
   "target_in": 600,
   "window_in": 48,
   "max_width_in": 23,
-  "gap_in": 0.5,
+  "gap_in": 1.0,
   "flush_after_min": 30,
   "fetch_every_min": 2,
   "dashboard_url": "http://PI-HOSTNAME:PORT/status",

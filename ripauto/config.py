@@ -28,7 +28,7 @@ MACHINE_DEFAULTS = {
     "api_version": "2026-04",
     "potry_exe": r"C:\Program Files\PO-TRY\MtFlatbedPrinterApp.exe",
     "potry_prnlist": r"C:\Program Files\PO-TRY\PrnList",
-    "gap_in": 0.5,
+    "gap_in": 1.0,             # measured 1.02 in per gap on the 3-sheet preview, 2026-10-15
     "flush_after_min": 30,
     "fetch_every_min": 2,
     "max_width_in": None,      # printable width; None = not checked

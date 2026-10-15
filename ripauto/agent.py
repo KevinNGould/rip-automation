@@ -35,6 +35,7 @@ from . import ledger as L
 from .config import STATE_DIR, load_machine, load_or_exit
 from .handcheck import BY_HAND, FREE, download_names, hand_check, queue_job_names
 from .planner import Limits, plan
+from .potry import parse_size_cell
 
 RUNS_DIR = STATE_DIR / "runs"
 
@@ -94,7 +95,20 @@ def run_pictures(ledger, run):
     return pictures
 
 
+def measured(run, result):
+    """Actual length from the queue row (else the preview), and the gap per
+    picture it implies, for calibrating gap_in."""
+    size = parse_size_cell(((result or {}).get("row") or {}).get("Size (inch)")) \
+        or (result or {}).get("preview")
+    if not size:
+        return None, None
+    artwork = sum(i.sheet.length_in * i.copies for i in run.items)
+    gap = (size[1] - artwork) / (run.pictures - 1) if run.pictures > 1 else None
+    return size[1], (round(gap, 3) if gap is not None else None)
+
+
 def record_for(run_id, cfg, run, pictures, result, outcome, dry_run):
+    actual_in, gap_in = measured(run, result)
     return {
         "id": run_id,
         "machine_id": cfg["machine_id"],
@@ -109,6 +123,9 @@ def record_for(run_id, cfg, run, pictures, result, outcome, dry_run):
         "planned_in": run.planned_in,
         "preview": (result or {}).get("preview"),
         "queue_size": ((result or {}).get("row") or {}).get("Size (inch)"),
+        "actual_in": actual_in,
+        "gap_measured_in": gap_in,
+        "gap_planned_in": cfg.get("gap_in"),
         "gate": (result or {}).get("gate"),
         "started": (result or {}).get("started"),
         "ended": (result or {}).get("ended"),
@@ -210,6 +227,18 @@ def cycle(cfg, ledger, driver, now, *, dl_names_fn, runs_dir=RUNS_DIR, save=lamb
             break
         L.finish_run(ledger, run_id, run.items, now)
         move_ripped(ledger, run, run_id, cfg["queue_dir"])
+        queue_size = parse_size_cell((result.get("row") or {}).get("Size (inch)"))
+        if queue_size and queue_size[1] > cfg["cap_in"]:
+            # Backstop: the preview gate passed but the ripped job is too long.
+            # The agent never touches the queue toolbar; a person deletes it.
+            problem = (f"ripped job {result['job_name']} is {queue_size[1]:.1f} in, over "
+                       f"{cfg['cap_in']:g} in: delete it from the RIP queue by hand, don't print it")
+            L.hold(ledger, keys, problem, now)
+            write_record(runs_dir, record_for(run_id, cfg, run, pictures, result, "over_cap", False))
+            save()
+            summary["stopped"] = problem
+            log(f"Run {run_id}: {problem}")
+            break
         write_record(runs_dir, record_for(run_id, cfg, run, pictures, result, "ripped", False))
         save()
         summary["ripped"].append(run_id)

@@ -57,7 +57,7 @@ class Machine(unittest.TestCase):
                          ("8color", "Printer #3", "8-Color DTF"))
         self.assertEqual(len(cfg["product_rules"]), 1)
         self.assertEqual({r["line"] for r in cfg["shop_rules"]}, {"8color", "cmyk"})
-        self.assertEqual((cfg["max_width_in"], cfg["gap_in"]), (23, 0.5))
+        self.assertEqual((cfg["max_width_in"], cfg["gap_in"]), (23, 1.0))
 
     def test_old_keys_in_machine_json_refused(self):
         with self.assertRaisesRegex(ConfigError, "product_rules now live in machines.json"):
