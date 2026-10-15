@@ -46,6 +46,32 @@ class Describe(unittest.TestCase):
         self.assertFalse(can_rip_now(True, False, {"state": "idle"}))    # nothing waiting
         self.assertFalse(can_rip_now(True, False, None))
 
+    def test_restart_waits_for_the_agent_then_starts_it(self):
+        import ripauto.control as c
+        import tempfile
+        from pathlib import Path
+        saved = c.RESTART_PATH
+        with tempfile.TemporaryDirectory() as d:
+            c.RESTART_PATH = Path(d) / "RESTART"
+            try:
+                pids = iter([100, 100, 100, None, None])          # stops on the 3rd poll
+                started = []
+                ok, msg = c.restart_and_wait(sleep=lambda s: None, clock=iter(range(1000)).__next__,
+                                             holder=lambda: next(pids),
+                                             starter=lambda: (started.append(1), (True, "Starting…"))[1])
+                self.assertTrue(ok)
+                self.assertEqual(started, [1])
+                self.assertTrue(c.RESTART_PATH.exists())          # the agent removes it when it stops
+                # agent never stops (busy): gives up without starting a second one
+                started.clear()
+                ok, msg = c.restart_and_wait(timeout=5, sleep=lambda s: None,
+                                             clock=iter(range(1000)).__next__, holder=lambda: 100,
+                                             starter=lambda: (started.append(1), (True, ""))[1])
+                self.assertFalse(ok)
+                self.assertEqual(started, [])
+            finally:
+                c.RESTART_PATH = saved
+
     def test_dashboard_base(self):
         self.assertEqual(dashboard_base({"dashboard_url": "http://osshub.local:8085/api/heartbeat"}),
                          "http://osshub.local:8085")

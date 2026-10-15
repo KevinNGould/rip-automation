@@ -162,6 +162,31 @@ def request_restart():
     RESTART_PATH.write_text("from the RIP Agent window\n", encoding="utf-8")
 
 
+def restart_and_wait(timeout=180, poll=2, sleep=None, clock=None, holder=None, starter=None):
+    """Restart from the window: ask the agent to stop at its next safe point,
+    wait for it to go, then start the task ourselves. The window runs outside
+    Task Scheduler's job object, so this works where the agent's own relaunch
+    can't (2026-10-15 13:58). Returns (ok, message)."""
+    import time
+    from .lock import lock_holder
+    sleep, clock = sleep or time.sleep, clock or time.time
+    holder, starter = holder or lock_holder, starter or start
+    old = holder()
+    request_restart()
+    if old is None:
+        return starter()
+    end = clock() + timeout
+    while clock() < end:
+        if holder() != old:
+            break
+        sleep(poll)
+    else:
+        return False, "The agent didn't stop within 3 minutes (busy with a run?). It restarts once it's done."
+    if holder() not in (None, old):
+        return True, "Restarted."
+    return starter()
+
+
 def start():
     """Turn the pause switch off and ask Task Scheduler to run the agent.
     Returns (ok, message)."""

@@ -148,10 +148,14 @@ class App:
         self.update_once()
 
     def do_restart(self):
-        control.request_restart()
-        self.note.configure(text="Restart requested. It stops at the next safe point (never mid-run) "
-                                 "and starts itself again a few seconds later.")
-        self.update_once()
+        self.note.configure(text="Restarting: the agent stops at its next safe point (never mid-run), "
+                                 "then this window starts it again.")
+        self.restart_btn.configure(text="Restarting…", state="disabled")
+
+        def work():
+            ok, msg = control.restart_and_wait()
+            self.root.after(0, lambda: (self.note.configure(text=msg), self.update_once()))
+        threading.Thread(target=work, daemon=True).start()
 
     def open_dashboard(self):
         base = control.dashboard_base(self.cfg)
