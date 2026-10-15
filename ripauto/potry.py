@@ -564,6 +564,7 @@ def new_job(main):
 AGENT_TABS_PATH = STATE_DIR / "agent_tabs.json"
 TAB_CLOSE_PATH = STATE_DIR / "potry_tab_close.json"
 TAB_CLOSE_METHODS = ("close_button", "context_menu", "middle_click", "ctrl_w", "ctrl_f4")
+PROBE_VERBOSE = False         # the probe prints what it sees
 
 
 def job_tab_names(main):
@@ -647,6 +648,9 @@ def try_close_tab(main, pid, name, method):
                     items += [m for m in w.descendants(control_type="MenuItem") if visible(m)]
                 except Exception:
                     pass
+            names = [name_of(m) for m in items]
+            if PROBE_VERBOSE:
+                print(f"    right-click menu items: {names or 'none appeared'}")
             close = [m for m in items if name_of(m).lower().replace("&", "") in ("close", "close tab", "close job")]
             if len(close) != 1:
                 for w in process_windows(pid):          # close the menu again, without the mouse
@@ -711,7 +715,16 @@ def close_agent_tabs(main, pid, keep=()):
 def probe_tab_close(main, pid):
     """For Kevin, once: open a fresh empty job tab and find a way to close it.
     Saves the first method that works to state/potry_tab_close.json."""
+    global PROBE_VERBOSE
+    PROBE_VERBOSE = True
     show_layout(main)
+    try:
+        bar = [c for c in main.descendants(control_type="Tab") if visible(c)]
+        for b in bar:
+            print(f"  tab bar {name_of(b)!r}: " + ", ".join(
+                f"{c.element_info.control_type}:{name_of(c)!r}" for c in b.children()))
+    except Exception:
+        pass
     name = new_job(main)
     if not name:
         print("Couldn't tell which tab New made; nothing tried.")
