@@ -85,6 +85,16 @@ def finish_run(ledger, run_id, items, now=None):
         rec["updated_at"] = _stamp(now)
 
 
+def unstart_run(ledger, keys, now=None):
+    """A run that never got as far as Print (a person used the PC): its sheets
+    go back to queued as if it hadn't started."""
+    for key in keys:
+        rec = ledger[key]
+        rec.pop("run", None)
+        rec.pop("run_copies", None)
+        rec.update(status=QUEUED, updated_at=_stamp(now))
+
+
 def hold(ledger, keys, reason, now=None):
     for key in keys:
         rec = ledger[key]

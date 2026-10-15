@@ -118,6 +118,13 @@ class Popup:
             orders += f" +{p['more_orders']} more"
         self.what.configure(text=f"{p.get('planned_in', 0):.0f} in · {p.get('pictures', 0)} sheet"
                                  f"{'' if p.get('pictures') == 1 else 's'} · {orders}")
+        if p.get("note"):
+            self.hint.configure(text=p["note"], fg=AMBER)
+            if left > 60 and not p.get("message"):
+                self.title.configure(text=f"Auto rip in {left // 60}:{left % 60:02d}")
+        else:
+            self.hint.configure(text="Hands off the mouse when it starts. PO-TRY only rips; nothing prints.",
+                                fg=DIM)
         self.root.after(250, self.tick)
 
 

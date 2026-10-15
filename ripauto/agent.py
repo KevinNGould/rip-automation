@@ -49,6 +49,7 @@ from .planner import Limits, plan
 from .potry import RIPPING_STATUSES, parse_size_cell
 from .status import NullReporter, Reporter
 from .warning import RIP_NOW_PATH, Gate, Warner
+from .handsoff import HumanInput
 
 RUNS_DIR = STATE_DIR / "runs"
 PAUSE_PATH = STATE_DIR / "PAUSE"
@@ -59,6 +60,8 @@ COUNTDOWN = "rip warning countdown"
 BUSY = "PO-TRY is busy ripping"
 UNREADABLE = "can't read PO-TRY's queue or Downloads"
 UNREADABLE_ERROR_AFTER = 3
+INTERRUPTED = "interrupted by someone using the PC"
+RETRY_AFTER_INTERRUPT_S = 300
 RESTART_PATH = STATE_DIR / "RESTART"     # RIP Agent window "Restart agent" (picks up new code)
 TASK_NAME = "OSS RIP Agent"
 
@@ -285,7 +288,12 @@ def cycle(cfg, ledger, driver, now, *, dl_names_fn, runs_dir=RUNS_DIR, save=lamb
         progress = lambda pct: reporter.update(progress_pct=pct)
         if dry_run:
             on_start()
-            result = driver.rip(pictures, run.planned_in, dry_run=True, on_progress=progress)
+            try:
+                result = driver.rip(pictures, run.planned_in, dry_run=True, on_progress=progress)
+            except HumanInput as e:
+                log(f"Dry run interrupted: {e}.")
+                reporter.update(state="idle", current_run=None)
+                return done(INTERRUPTED)
             write_record(runs_dir, record_for(run_id + "-dry", cfg, run, pictures, result,
                                               "dry_run", True))
             summary["dry_runs"].append(run_id)
@@ -297,6 +305,16 @@ def cycle(cfg, ledger, driver, now, *, dl_names_fn, runs_dir=RUNS_DIR, save=lamb
         try:
             on_start()                      # close the corner warning before taking the mouse
             result = driver.rip(pictures, run.planned_in, dry_run=False, on_progress=progress)
+        except HumanInput as e:
+            # A person used the PC before Print (CRITIQUE A1). The driver backed
+            # out; nothing is wrong with these sheets, so they stay queued.
+            L.unstart_run(ledger, keys, now)
+            write_record(runs_dir, dict(record_for(run_id, cfg, run, pictures, None, "interrupted", False),
+                                        note=str(e)))
+            save()
+            log(f"Run {run_id} interrupted: {e}. Sheets stay queued; trying again later.")
+            reporter.update(state="idle", current_run=None)
+            return done(INTERRUPTED)
         except Exception as e:               # Stop from the driver, or anything else
             L.hold(ledger, keys, f"manual check: run {run_id} stopped: {e}", now)
             write_record(runs_dir, record_for(run_id, cfg, run, pictures, None, "stopped", False))
@@ -493,9 +511,12 @@ def run_loop(cfg, ledger, driver, *, fetcher, dl_names_fn, reporter, save, log,
                 unreadable = 0
             if summary["waiting"] == BUSY:
                 gate.hold("Waiting for PO-TRY to finish ripping another job")
+            elif summary["waiting"] == INTERRUPTED:
+                gate.retry_later(RETRY_AFTER_INTERRUPT_S,
+                                 "Rip interrupted: someone used the mouse or keyboard. Trying again.")
             elif summary["waiting"] not in (COUNTDOWN, UNREADABLE):
                 gate.reset()                       # run went, or isn't ready any more
-            if rip_now and summary["waiting"] not in (COUNTDOWN, BUSY, UNREADABLE):
+            if rip_now and summary["waiting"] not in (COUNTDOWN, BUSY, UNREADABLE, INTERRUPTED):
                 if summary["waiting"] in ("nothing queued", "no run ready yet"):
                     log("Rip now: nothing is waiting to rip.")
                 try:

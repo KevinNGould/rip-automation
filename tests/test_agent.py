@@ -6,6 +6,7 @@ from pathlib import Path
 
 from ripauto import ledger as L
 from ripauto.agent import Stop, cycle, own_job_names
+from ripauto.handsoff import HumanInput
 
 NOW = datetime(2026, 10, 15, 12, 0, 0)
 CFG = {"machine_id": "8color-1", "cap_in": 650, "target_in": 600, "window_in": 48,
@@ -24,6 +25,9 @@ class FakeDriver:
 
     def rip(self, pictures, planned_in, dry_run, on_progress=None):
         self.calls.append(([p.name for p in pictures], planned_in, dry_run))
+        if getattr(self, "interrupt", 0) > 0:
+            self.interrupt -= 1
+            raise HumanInput("the mouse moved (before clicking RIP)")
         if on_progress and not dry_run:
             for pct in (41, 87, 100):
                 on_progress(pct)
@@ -291,6 +295,23 @@ class Cycle(unittest.TestCase):
         self.assertEqual(d.calls, [])
         d.rows = [{"Job name": "47000-x-(1)", "Status": "Transmission finished", "Processing": "100"}]
         summary, _ = self.env.run(d)
+        self.assertEqual(len(summary["ripped"]), 1)
+
+    def test_person_interrupting_leaves_sheets_queued(self):
+        self.env.add("a", 47930, 300.0)
+        self.env.add("b", 47931, 300.0)
+        d = FakeDriver()
+        d.interrupt = 1
+        summary, _ = self.env.run(d)
+        self.assertEqual(summary["waiting"], "interrupted by someone using the PC")
+        self.assertIsNone(summary["stopped"])
+        for k in ("a", "b"):
+            self.assertEqual(L.status(self.env.ledger[k]), L.QUEUED)
+            self.assertNotIn("run", self.env.ledger[k])
+        [rec] = [json.loads(p.read_text()) for p in self.env.runs.glob("*.json")]
+        self.assertEqual(rec["outcome"], "interrupted")
+        self.assertIn("mouse moved", rec["note"])
+        summary, _ = self.env.run(d)                     # next attempt goes through
         self.assertEqual(len(summary["ripped"]), 1)
 
     def test_two_runs_in_one_cycle_get_distinct_ids(self):

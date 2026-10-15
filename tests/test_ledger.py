@@ -59,6 +59,15 @@ class Runs(unittest.TestCase):
         self.assertEqual(L.status(led["a"]), L.RIPPED)
         self.assertEqual(led["a"]["runs"], ["r1", "r2"])
 
+    def test_unstart_run_puts_sheets_back(self):
+        led = {"a": rec(1, qty=2)}
+        L.start_run(led, "r1", [item(led, "a", 2)], NOW)
+        L.unstart_run(led, ["a"], NOW)
+        self.assertEqual(L.status(led["a"]), L.QUEUED)
+        self.assertNotIn("run", led["a"])
+        self.assertEqual(led["a"].get("copies_ripped"), 0)
+        self.assertEqual(L.in_run_keys(led), [])
+
     def test_hold_and_by_hand(self):
         led = {"a": rec(1), "b": rec(2)}
         L.hold(led, ["a"], "over 650 in", NOW)

@@ -91,6 +91,8 @@ class Gate:
         self.go = False
         self.snoozed_until = 0.0
         self.last_info = None
+        self.prev_info = None          # the last run shown, kept after it started
+        self.note = None               # extra line in the popup (e.g. "interrupted")
 
     @property
     def active(self):
@@ -99,7 +101,19 @@ class Gate:
     def reset(self):
         if self.deadline is not None:
             self.warner.close()
-        self.deadline, self.go, self.last_info = None, False, None
+        self.deadline, self.go, self.last_info, self.note = None, False, None, None
+
+    def retry_later(self, seconds, note):
+        """The run started but a person interrupted it before Print: count down
+        again from `seconds` with a note saying why (CRITIQUE A1)."""
+        now = self.clock()
+        info = self.last_info or self.prev_info
+        self.reset()
+        self.deadline, self.note = now + seconds, note
+        self.log(f"Trying again in {seconds // 60} min.")
+        if info:
+            self.last_info = dict(info, deadline=self.deadline, message=None, note=note, rip_now=False)
+            self.warner.show(self.last_info)
 
     def hold(self, message):
         """The run was cleared to start but can't yet (PO-TRY is busy ripping
@@ -113,6 +127,7 @@ class Gate:
 
     def started(self):
         """Called right before the agent takes the mouse: close the popup."""
+        self.prev_info = self.last_info
         self.reset()
 
     def __call__(self, run):
@@ -155,6 +170,7 @@ class Gate:
             "deadline": self.deadline, "message": message, "corner": self.corner,
             "planned_in": run.planned_in, "pictures": run.pictures, "orders": run.orders[:12],
             "more_orders": max(0, len(run.orders) - 12), "rip_now": bool(rip_now or self.go),
+            "note": self.note,
         }
         self.warner.show(self.last_info)
         return cleared

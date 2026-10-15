@@ -46,6 +46,7 @@ except ImportError:          # checked in main(), so tests can import this modul
     Application = Desktop = None
 
 from .config import STATE_DIR, load_machine, load_or_exit
+from .handsoff import HandsOff, HumanInput
 from .planner import planned_length
 from .sheets import png_size_in
 
@@ -53,6 +54,7 @@ LOG_PATH = STATE_DIR / "agent.log"         # earlier logs stay in state/rip_log.
 EXE_NAME = "MtFlatbedPrinterApp.exe"
 EXE_PATH = None             # set from machine.json by configure()
 PRN_DIR = None
+HANDS = HandsOff()            # notices a person using the PC mid-sequence (CRITIQUE A1)
 
 LOAD_TIMEOUT = 300          # picture load
 PREVIEW_TIMEOUT = 120       # Print preview dialog to appear
@@ -236,18 +238,28 @@ def press(ctrl, opens_dialog=False):
     Plain buttons are invoked without moving the mouse. Buttons that open a
     dialog (Add, RIP) or act inside one (Print) get a real mouse click instead:
     PO-TRY doesn't answer an invoke until the dialog it opens is closed, which
-    would freeze the driver."""
+    would freeze the driver.
+
+    While the hands-off guard is armed (New until Print), a person using the
+    PC since the agent's last action stops everything before the click
+    (CRITIQUE A1)."""
+    what = name_of(ctrl) or "a button"
     if opens_dialog:
         try:
             ctrl.top_level_parent().set_focus()
         except Exception:
             pass
+        HANDS.mark()                            # focusing can register as input
+        HANDS.check(f"before clicking {what}", need_front=True)
         ctrl.click_input()
     else:
+        HANDS.check(f"before pressing {what}")
         try:
             ctrl.invoke()
         except Exception:
+            HANDS.check(f"before clicking {what}", need_front=True)
             ctrl.click_input()
+    HANDS.mark()
     time.sleep(SETTLE)
 
 
@@ -591,6 +603,13 @@ def open_add_dialog(main, pid):
     return dlg
 
 
+def keys(ctrl, text, where, **kw):
+    """Type into a PO-TRY control, guarded like press()."""
+    HANDS.check(f"before {where}", need_front=True)
+    ctrl.type_keys(text, **kw)
+    HANDS.mark()
+
+
 def fill_name_box(dlg, text):
     box = file_name_box(dlg)
     if box is None:
@@ -599,8 +618,9 @@ def fill_name_box(dlg, text):
         box.set_edit_text(text)
     except Exception:
         box.set_focus()
-        box.type_keys("^a{BACKSPACE}")
-        box.type_keys(re.sub(r"([+^%~(){}])", r"{\1}", text), with_spaces=True)
+        HANDS.mark()
+        keys(box, "^a{BACKSPACE}", "typing a file name")
+        keys(box, re.sub(r"([+^%~(){}])", r"{\1}", text), "typing a file name", with_spaces=True)
     time.sleep(0.5)
     return box
 
@@ -611,7 +631,7 @@ def press_open(dlg, box):
     if opens:
         press(opens[0])
     else:
-        box.type_keys("{ENTER}")
+        keys(box, "{ENTER}", "opening the file")
 
 
 def add_picture(main, pid, path):
@@ -633,14 +653,14 @@ def add_pictures_together(main, pid, paths):
         raise MultiAddRefused("multi-add needs all files in one folder")
     dlg = open_add_dialog(main, pid)
     box = fill_name_box(dlg, str(folder))
-    box.type_keys("{ENTER}")                      # go to the folder first
+    keys(box, "{ENTER}", "opening the folder")    # go to the folder first
     time.sleep(SETTLE)
     press_open(dlg, fill_name_box(dlg, " ".join(f'"{p.name}"' for p in paths)))
     try:
         wait_for(lambda: not visible(dlg), 30, "the file dialog to close")
     except Stop:
         try:
-            dlg.type_keys("{ESC}")
+            keys(dlg, "{ESC}", "closing the Add dialog")
         except Exception:
             pass
         raise MultiAddRefused("the Add dialog didn't take several files at once")
@@ -660,9 +680,13 @@ def wait_loaded(main):
 
 
 def intelligent_layout(main):
+    HANDS.check("before F3")
     main.set_focus()
+    HANDS.mark()
     time.sleep(0.5)
+    HANDS.check("before F3", need_front=True)
     main.type_keys("{F3}")
+    HANDS.mark()
     time.sleep(3)
     log(f"  F3 done  {fmt(layout_values(main))}")
 
@@ -720,55 +744,68 @@ def rip_pictures(main, pid, pictures, cfg, planned_in, dry_run,
     started = datetime.now()
     log(f"=== run of {len(pictures)} picture(s), planned {planned_in:.1f} in, job {job}"
         f"{'   (DRY RUN)' if dry_run else ''}")
-    show_layout(main)
-    new_job(main)
-    log("  new job")
-    pictures_to_add = list(pictures)
-    if multi_add:
-        distinct = list(dict.fromkeys(pictures))
-        for chunk in multi_add_chunks(distinct):
-            try:
-                add_pictures_together(main, pid, chunk)
-            except MultiAddRefused as e:
-                log(f"  multi-add refused ({e}); adding the rest one at a time")
-                break
-            for p in chunk:
-                pictures_to_add.remove(p)
-            log(f"  multi-add took {len(chunk)} file(s) in one go")
-    for i, p in enumerate(pictures_to_add, 1):
-        add_picture(main, pid, p)
-        log(f"  added {i}/{len(pictures_to_add)}  {p.name}")
-    if "loaded" in pause_at:
-        pause("all pictures loaded, before F3")
-    intelligent_layout(main)
-
-    # Mark the time before RIP is pressed, so the queue row's timestamp is
-    # never earlier than this whichever moment PO-TRY stamps it.
-    started_ts = time.time() - 5
-    started_str = datetime.fromtimestamp(started_ts).strftime("%Y-%m-%d %H:%M:%S")
-    press(tool_button(main, "RIP"), opens_dialog=True)
-    preview = wait_for(lambda: find_preview(main, pid), PREVIEW_TIMEOUT, "the Print preview dialog")
-    print_btn, cancel_btn = preview_buttons(preview)
-    if not (print_btn and cancel_btn):
-        raise Stop("the preview's Print/Cancel buttons couldn't be confirmed")
-
-    size = read_preview(preview, job, cfg.get("max_width_in"))
-    gate = gate_reason(size, cfg["cap_in"], planned_in, len(pictures), cfg.get("gap_in", 0))
-    log(f"  preview size: {size}   planned {planned_in:.1f} in   gate: {gate or 'ok'}")
-    if "preview" in pause_at:
-        pause("the Print preview")
-    result = {"job_name": job, "preview": size, "gate": gate, "row": None,
-              "started": started.isoformat(timespec="seconds"), "ended": None}
-
-    if dry_run or gate:
-        press(cancel_btn, opens_dialog=True)
-        wait_for(lambda: not find_preview(main, pid), 30, "the preview to close")
-        log("  pressed Cancel" + (" (dry run)" if dry_run else f": {gate}"))
-        result["ended"] = datetime.now().isoformat(timespec="seconds")
+    # Hands-off guard from New until Print (CRITIQUE A1). Not armed when the
+    # dry-run probe pauses for a person to press Enter.
+    if not pause_at:
+        HANDS.arm(pid)
+    try:
         show_layout(main)
-        return result
+        new_job(main)
+        log("  new job")
+        pictures_to_add = list(pictures)
+        if multi_add:
+            distinct = list(dict.fromkeys(pictures))
+            for chunk in multi_add_chunks(distinct):
+                try:
+                    add_pictures_together(main, pid, chunk)
+                except MultiAddRefused as e:
+                    log(f"  multi-add refused ({e}); adding the rest one at a time")
+                    break
+                for p in chunk:
+                    pictures_to_add.remove(p)
+                log(f"  multi-add took {len(chunk)} file(s) in one go")
+        for i, p in enumerate(pictures_to_add, 1):
+            add_picture(main, pid, p)
+            log(f"  added {i}/{len(pictures_to_add)}  {p.name}")
+        if "loaded" in pause_at:
+            pause("all pictures loaded, before F3")
+        intelligent_layout(main)
 
-    press(print_btn, opens_dialog=True)
+        # Mark the time before RIP is pressed, so the queue row's timestamp is
+        # never earlier than this whichever moment PO-TRY stamps it.
+        started_ts = time.time() - 5
+        started_str = datetime.fromtimestamp(started_ts).strftime("%Y-%m-%d %H:%M:%S")
+        press(tool_button(main, "RIP"), opens_dialog=True)
+        preview = wait_for(lambda: find_preview(main, pid), PREVIEW_TIMEOUT, "the Print preview dialog")
+        print_btn, cancel_btn = preview_buttons(preview)
+        if not (print_btn and cancel_btn):
+            raise Stop("the preview's Print/Cancel buttons couldn't be confirmed")
+
+        size = read_preview(preview, job, cfg.get("max_width_in"))
+        gate = gate_reason(size, cfg["cap_in"], planned_in, len(pictures), cfg.get("gap_in", 0))
+        log(f"  preview size: {size}   planned {planned_in:.1f} in   gate: {gate or 'ok'}")
+        if "preview" in pause_at:
+            pause("the Print preview")
+        result = {"job_name": job, "preview": size, "gate": gate, "row": None,
+                  "started": started.isoformat(timespec="seconds"), "ended": None}
+
+        if dry_run or gate:
+            press(cancel_btn, opens_dialog=True)
+            HANDS.disarm()
+            wait_for(lambda: not find_preview(main, pid), 30, "the preview to close")
+            log("  pressed Cancel" + (" (dry run)" if dry_run else f": {gate}"))
+            result["ended"] = datetime.now().isoformat(timespec="seconds")
+            show_layout(main)
+            return result
+
+        press(print_btn, opens_dialog=True)
+    except HumanInput as e:
+        HANDS.disarm()
+        log(f"  STOPPED: {e}. Backing out; nothing was ripped.")
+        back_out(main, pid)
+        raise
+    finally:
+        HANDS.disarm()                       # from here PO-TRY rips on its own
     wait_for(lambda: not find_preview(main, pid), 60, "the preview to close")
     log("  rip started")
     stems = [Path(p).stem for p in dict.fromkeys(pictures)]
@@ -781,6 +818,27 @@ def rip_pictures(main, pid, pictures, cfg, planned_in, dry_run,
     # Left on the RIP queue view: that's where people print the job from.
     # The next run switches back to the layout view itself.
     return result
+
+
+def back_out(main, pid):
+    """After a person interrupted: close the Print preview or the Add dialog
+    with Cancel, through UI automation only (no mouse, no keys)."""
+    try:
+        preview = find_preview(main, pid)
+        if preview:
+            _, cancel = preview_buttons(preview)
+            if cancel:
+                cancel.invoke()
+                log("  pressed Cancel on the preview")
+        for w in candidate_windows(main, pid):
+            if visible(w) and file_name_box(w):
+                for b in w.descendants(control_type="Button"):
+                    if b.element_info.automation_id == "2" and visible(b):   # Cancel
+                        b.invoke()
+                        log("  closed the Add dialog")
+                        break
+    except Exception as e:                    # best effort: the agent holds nothing either way
+        log(f"  couldn't fully back out ({type(e).__name__}); PO-TRY may need a look")
 
 
 def copies_from_name(path):

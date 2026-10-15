@@ -154,6 +154,24 @@ class Loop(unittest.TestCase):
         self.assertEqual(len(d.calls), 1)                           # then ripped normally
         self.assertEqual(L.status(self.ledger["a"]), L.RIPPED)
 
+    def test_interrupted_run_retries_after_5_min_with_a_note(self):
+        self.add("a", 47950, 600.0)
+        d = FakeDriver()
+        d.interrupt = 1
+        seen = []
+
+        def watch(ft):
+            if self.pending.exists():
+                p = json.loads(self.pending.read_text())
+                seen.append((round(p["deadline"] - ft.t), p.get("note")))
+        self.loop(d, max_sleeps=200, on_sleep=watch)
+        self.assertEqual(len(d.calls), 2)                  # interrupted, then the retry
+        self.assertEqual(L.status(self.ledger["a"]), L.RIPPED)
+        notes = [s for s in seen if s[1]]
+        self.assertTrue(notes and notes[0][0] > 290)       # ~5 min countdown after the interruption
+        self.assertIn("Rip interrupted", notes[0][1])
+        self.assertTrue(any("interrupted" in line for line in self.logs))
+
     def test_wait_5_min(self):
         self.add("a", 47950, 600.0)
         d = FakeDriver()
