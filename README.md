@@ -9,3 +9,15 @@ Pulls new gang sheet orders from Shopify, batches them, and rips them in PO-TRY 
 - `config/*.example.json`: copy to `machine.json` / `secrets.json` on each PC. The real ones are git-ignored and must never be committed.
 
 Run anything that touches PO-TRY from an administrator prompt; PO-TRY runs elevated.
+
+From the repo root:
+
+```
+python -m ripauto.fetch                          list this machine's sheets (downloads nothing)
+python -m ripauto.fetch --download               download new sheets to queue_dir
+python -m ripauto.potry --inspect-queue          read PO-TRY's RIP queue (admin)
+python -m ripauto.potry --dry-run --limit 1      every step, Cancel instead of Print (admin)
+python -m unittest                               run the tests
+```
+
+Runtime files (ledger `state/processed.json`, `state/rip_log.txt`) live in `state/`, which is git-ignored.
