@@ -104,3 +104,40 @@ def hold(ledger, keys, reason, now=None):
 
 def mark_by_hand(ledger, key, detail, now=None):
     ledger[key].update(status=BY_HAND, by_hand=detail, updated_at=_stamp(now))
+
+
+def requeue(ledger, orders, now=None):
+    """Held sheets of these order numbers go back to queued (a person checked
+    them). Returns the keys changed; ripped, by-hand and queued sheets are left alone."""
+    want = {str(o).lstrip("#") for o in orders}
+    changed = []
+    for key, rec in ledger.items():
+        if str(rec.get("order", "")).lstrip("#") in want and status(rec) == HELD:
+            rec.pop("hold_reason", None)
+            rec.pop("run", None)
+            rec.pop("run_copies", None)
+            rec.update(status=QUEUED, updated_at=_stamp(now))
+            changed.append(key)
+    return changed
+
+
+def main(argv=None):
+    import argparse
+    from .lock import agent_running
+    ap = argparse.ArgumentParser(description="Ledger fixes a person asks for.")
+    ap.add_argument("--requeue", nargs="+", metavar="ORDER",
+                    help="put these orders' held sheets back in the queue")
+    args = ap.parse_args(argv)
+    if args.requeue:
+        if agent_running():
+            raise SystemExit("The agent is running and keeps its own copy of the ledger. "
+                             "Stop it first (RIP Agent window, or Restart agent), then run this.")
+        ledger = load()
+        keys = requeue(ledger, args.requeue)
+        save(ledger)
+        print(f"Re-queued {len(keys)} sheet(s): " + ", ".join(ledger[k]["order"] for k in keys)
+              if keys else "No held sheets for those orders.")
+
+
+if __name__ == "__main__":
+    main()

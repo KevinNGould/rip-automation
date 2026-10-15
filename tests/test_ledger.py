@@ -84,5 +84,20 @@ class Runs(unittest.TestCase):
             self.assertEqual(L.load(Path(d) / "missing.json"), {})
 
 
+class Requeue(unittest.TestCase):
+    def test_only_held_sheets_of_those_orders(self):
+        led = {"a": rec(47977, status=L.HELD, hold_reason="length gate", run="r1"),
+               "b": rec(47979, status=L.HELD, hold_reason="length gate"),
+               "c": rec(47980, status=L.HELD, hold_reason="other"),
+               "d": rec(47977, status=L.RIPPED),
+               "e": rec(47979, status=L.BY_HAND)}
+        self.assertEqual(L.requeue(led, ["#47977", "47979"], NOW), ["a", "b"])
+        self.assertEqual(led["a"]["status"], L.QUEUED)
+        self.assertNotIn("hold_reason", led["a"])
+        self.assertNotIn("run", led["a"])
+        self.assertEqual(led["c"]["status"], L.HELD)
+        self.assertEqual((led["d"]["status"], led["e"]["status"]), (L.RIPPED, L.BY_HAND))
+
+
 if __name__ == "__main__":
     unittest.main()
