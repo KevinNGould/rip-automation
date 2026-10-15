@@ -1,6 +1,6 @@
 # Decisions and open questions
 
-Newest first. Claude (chat) keeps this file; Claude Code adds entries when it decides something during the build.
+Newest first. Claude (chat) keeps this file; Claude Code adds entries when it decides something during the build. Build progress and next steps are in `docs/STATUS.md`.
 
 ## 2026-10-15
 
