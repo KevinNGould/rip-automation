@@ -4,7 +4,14 @@ Claude Code rewrites this file at the end of every working session and pushes it
 
 **Last updated:** 2026-10-15 ~14:30 (printer PC clock) · **HEAD:** see `git log -1`
 
-## Latest (14:30): the 14:07 run was cut short by a big picture still loading; fixed, not yet live
+## Latest (14:40): load-wait fix is LIVE; #47977 + #47979 ripped; unattended evening next
+
+- 14:16: agent stopped, `python -m ripauto.ledger --requeue 47977 47979` (new command; it refuses while the agent runs), started again (pid 20268, pause off).
+- 14:18: Kevin forced the run (Rip now). The log read "68 of 357 MB read and nothing happening for 15 s; going on". As Kevin pointed out, PO-TRY reloads pictures it has already loaded from its own memory. Preview 295.424 = planned, gate ok, ripped 14:26, and the finished job's tab was closed.
+- **Not yet proven:** that a *fresh* load from disk shows in PO-TRY's read counter. The first run of new files tonight will show it in the "loaded … (N of M MB read …)" line. If reads don't count, the 15 s quiet rule plus the length gate (with its 2 retries) still cover it.
+- **Tonight:** Kevin leaves the PC on with PO-TRY open and watches over RustDesk. Checked (read-only): sleep, hibernate and display-off are all *never*; no lock-on-idle is set. Kevin's checklist is in his chat reply: RustDesk view-only, "lock after session end" off, Windows Update paused.
+
+## Earlier (14:30): the 14:07 run was cut short by a big picture still loading; fixed, not yet live
 
 - **14:07 Rip-now run (#47977 + #47979) was cancelled by the length gate:** the preview read 24.0 in, against 295.4 planned. #47979 is a 320 MB, 270 in PNG and was still loading when F3 and RIP were pressed. Nothing was ripped. Both sheets are **held**.
 - **Tab closing worked in real use.** Before New: "closed 2 job tab(s)" (Job26/27). After Cancel: "answered No to 'save changes?'" and "closed 1 job tab(s)".
