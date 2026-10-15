@@ -66,6 +66,42 @@ class Gate(unittest.TestCase):
         self.assertIsNone(gate_reason((22.5, 67.5), 650, 65.197))   # within 3 in
 
 
+class AgentTabs(unittest.TestCase):
+    def setUp(self):
+        import ripauto.potry as p
+        self.p = p
+        self.tmp = tempfile.TemporaryDirectory()
+        self.saved = (p.AGENT_TABS_PATH, p.TAB_CLOSE_PATH)
+        p.AGENT_TABS_PATH = Path(self.tmp.name) / "agent_tabs.json"
+        p.TAB_CLOSE_PATH = Path(self.tmp.name) / "potry_tab_close.json"
+
+    def tearDown(self):
+        self.p.AGENT_TABS_PATH, self.p.TAB_CLOSE_PATH = self.saved
+        self.tmp.cleanup()
+
+    def test_remember_and_forget_only_our_tabs(self):
+        p = self.p
+        p.remember_tab(1234, "Job13")
+        p.remember_tab(1234, "Job14")
+        p.remember_tab(1234, "Job14")
+        p.remember_tab(1234, None)
+        self.assertEqual(p.agent_tabs(1234), ["Job13", "Job14"])
+        p.forget_tab(1234, "Job13")
+        self.assertEqual(p.agent_tabs(1234), ["Job14"])
+
+    def test_restarted_po_try_starts_the_list_over(self):
+        # A new PO-TRY process reuses names like Job3, which may be a person's tab.
+        self.p.remember_tab(1234, "Job3")
+        self.assertEqual(self.p.agent_tabs(5678), [])
+
+    def test_nothing_closed_until_a_method_is_proven(self):
+        self.p.remember_tab(1234, "Job13")
+        self.assertIsNone(self.p.tab_close_method())
+        self.assertEqual(self.p.close_agent_tabs(main=None, pid=1234), 0)   # never touches PO-TRY
+        self.p.TAB_CLOSE_PATH.write_text('{"method": "context_menu"}')
+        self.assertEqual(self.p.tab_close_method(), "context_menu")
+
+
 class Naming(unittest.TestCase):
     def test_job_name_is_first_picture_stem(self):
         self.assertEqual(job_name_for([Path("C:/q/47918-1-22in x 12in 1ft-1-(2).png"),

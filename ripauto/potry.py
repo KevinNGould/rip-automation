@@ -33,6 +33,7 @@ Setup once:  pip install pywinauto
 import argparse
 import csv
 import io
+import json
 import re
 import subprocess
 import sys
@@ -545,9 +546,194 @@ def glob_escape(text):
 # ---------------- PO-TRY: the steps ----------------
 
 def new_job(main):
-    before = job_tab_count(main)
+    """New job; returns the new tab's name (e.g. 'Job13'), or None if unclear."""
+    before = set(job_tab_names(main))
     press(tool_button(main, "New"))
-    wait_for(lambda: job_tab_count(main) > before, 15, "a new job tab")
+    wait_for(lambda: len(job_tab_names(main)) > len(before), 15, "a new job tab")
+    added = [n for n in job_tab_names(main) if n not in before]
+    return added[0] if len(added) == 1 else None
+
+
+# ---------------- job tabs (CRITIQUE A4) ----------------
+# Each run opens a job tab (New) and nothing closes it, so tabs full of
+# full-resolution sheets pile up. The agent closes only tabs it opened itself
+# (names recorded with PO-TRY's process id; a restarted PO-TRY reuses names,
+# so the list starts over), and only with a method the probe proved
+# (python -m ripauto.potry --probe-tab-close).
+
+AGENT_TABS_PATH = STATE_DIR / "agent_tabs.json"
+TAB_CLOSE_PATH = STATE_DIR / "potry_tab_close.json"
+TAB_CLOSE_METHODS = ("close_button", "context_menu", "middle_click", "ctrl_w", "ctrl_f4")
+
+
+def job_tab_names(main):
+    return [name_of(c) for c in main.descendants(control_type="TabItem")
+            if re.fullmatch(r"Job\d+", name_of(c))]
+
+
+def job_tab(main, name):
+    for c in main.descendants(control_type="TabItem"):
+        if name_of(c) == name:
+            return c
+    return None
+
+
+def _read_json(path, default):
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return default
+
+
+def agent_tabs(pid):
+    data = _read_json(AGENT_TABS_PATH, {})
+    return list(data.get("tabs", [])) if data.get("pid") == pid else []
+
+
+def _save_agent_tabs(pid, tabs):
+    AGENT_TABS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    AGENT_TABS_PATH.write_text(json.dumps({"pid": pid, "tabs": tabs}), encoding="utf-8")
+
+
+def remember_tab(pid, name):
+    if name:
+        tabs = agent_tabs(pid)
+        if name not in tabs:
+            _save_agent_tabs(pid, tabs + [name])
+
+
+def forget_tab(pid, name):
+    _save_agent_tabs(pid, [t for t in agent_tabs(pid) if t != name])
+
+
+def tab_close_method():
+    return _read_json(TAB_CLOSE_PATH, {}).get("method")
+
+
+def answer_save_prompt(main, pid):
+    """If closing a tab asks to save, answer No through a button named No /
+    Don't save (never anything else). Returns True if it answered."""
+    for w in candidate_windows(main, pid) + [main]:
+        try:
+            for b in w.descendants(control_type="Button"):
+                if visible(b) and name_of(b).replace("’", "'") in ("No", "Don't save", "Don't Save"):
+                    b.invoke()
+                    log("  answered No to 'save changes?'")
+                    return True
+        except Exception:
+            continue
+    return False
+
+
+def try_close_tab(main, pid, name, method):
+    """One attempt with one method; True if the tab is gone afterwards."""
+    tab = job_tab(main, name)
+    if tab is None:
+        return True
+    try:
+        if method == "close_button":
+            buttons = [b for b in tab.descendants(control_type="Button") if visible(b)]
+            if not buttons:
+                return False
+            buttons[0].invoke()
+        elif method == "context_menu":
+            HANDS.check(f"before right-clicking {name}", need_front=True)
+            tab.click_input(button="right")
+            HANDS.mark()
+            time.sleep(1)
+            items = []
+            for w in process_windows(pid) + [main]:
+                try:
+                    items += [m for m in w.descendants(control_type="MenuItem") if visible(m)]
+                except Exception:
+                    pass
+            close = [m for m in items if name_of(m).lower().replace("&", "") in ("close", "close tab", "close job")]
+            if len(close) != 1:
+                for w in process_windows(pid):          # close the menu again, without the mouse
+                    try:
+                        w.type_keys("{ESC}")
+                    except Exception:
+                        pass
+                return False
+            close[0].invoke()
+        elif method == "middle_click":
+            HANDS.check(f"before middle-clicking {name}", need_front=True)
+            tab.click_input(button="middle")
+            HANDS.mark()
+        elif method in ("ctrl_w", "ctrl_f4"):
+            HANDS.check(f"before selecting {name}")
+            try:
+                tab.select()
+            except Exception:
+                return False
+            HANDS.check(f"before closing {name}", need_front=True)
+            main.type_keys("^w" if method == "ctrl_w" else "^{F4}")
+            HANDS.mark()
+        else:
+            return False
+    except HumanInput:
+        raise
+    except Exception:
+        return False
+    time.sleep(1.5)
+    answer_save_prompt(main, pid)
+    time.sleep(0.5)
+    return job_tab(main, name) is None
+
+
+def close_agent_tabs(main, pid, keep=()):
+    """Close the job tabs this agent opened (except `keep`), with the proven
+    method. Best effort: anything odd just leaves the tab for next time."""
+    method = tab_close_method()
+    if not method:
+        return 0
+    closed = 0
+    HANDS.arm(pid)
+    try:
+        for name in agent_tabs(pid):
+            if name in keep:
+                continue
+            if try_close_tab(main, pid, name, method):
+                forget_tab(pid, name)
+                closed += 1
+            else:
+                log(f"  couldn't close job tab {name} ({method}); leaving it")
+                break
+    except HumanInput as e:
+        log(f"  stopped closing job tabs: {e}")
+    finally:
+        HANDS.disarm()
+    if closed:
+        log(f"  closed {closed} job tab(s) the agent had opened")
+    return closed
+
+
+def probe_tab_close(main, pid):
+    """For Kevin, once: open a fresh empty job tab and find a way to close it.
+    Saves the first method that works to state/potry_tab_close.json."""
+    show_layout(main)
+    name = new_job(main)
+    if not name:
+        print("Couldn't tell which tab New made; nothing tried.")
+        return None
+    print(f"Made an empty job tab {name}; trying ways to close it…")
+    try:
+        tab = job_tab(main, name)
+        kids = [f"{c.element_info.control_type}:{name_of(c)!r}" for c in tab.descendants()] if tab else []
+        print(f"  tab's own controls: {kids or 'none'}")
+    except Exception:
+        pass
+    for method in TAB_CLOSE_METHODS:
+        ok = try_close_tab(main, pid, name, method)
+        print(f"  {method:13} -> {'CLOSED' if ok else 'no'}")
+        if ok:
+            TAB_CLOSE_PATH.parent.mkdir(parents=True, exist_ok=True)
+            TAB_CLOSE_PATH.write_text(json.dumps({"method": method, "proven": datetime.now().isoformat(
+                timespec="seconds"), "potry_pid": pid}), encoding="utf-8")
+            print(f"Saved: the agent will close its own job tabs with '{method}'.")
+            return method
+    print("None worked. The agent will keep leaving tabs open; tell Code.")
+    return None
 
 
 def window_key(w):
@@ -744,14 +930,18 @@ def rip_pictures(main, pid, pictures, cfg, planned_in, dry_run,
     started = datetime.now()
     log(f"=== run of {len(pictures)} picture(s), planned {planned_in:.1f} in, job {job}"
         f"{'   (DRY RUN)' if dry_run else ''}")
+    show_layout(main)
+    # Job tabs the agent opened on earlier runs (CRITIQUE A4). The last run's
+    # tab stays open until now, so a person can look at its layout.
+    close_agent_tabs(main, pid)
     # Hands-off guard from New until Print (CRITIQUE A1). Not armed when the
     # dry-run probe pauses for a person to press Enter.
     if not pause_at:
         HANDS.arm(pid)
     try:
-        show_layout(main)
-        new_job(main)
-        log("  new job")
+        tab = new_job(main)
+        remember_tab(pid, tab)
+        log(f"  new job ({tab or 'tab name unclear'})")
         pictures_to_add = list(pictures)
         if multi_add:
             distinct = list(dict.fromkeys(pictures))
@@ -875,9 +1065,11 @@ def main():
                     help="comma list: loaded, preview. Waits for Enter so the probe can run")
     ap.add_argument("--try-multi-add", action="store_true",
                     help="with --batch: try adding all files in one Add dialog")
+    ap.add_argument("--probe-tab-close", action="store_true",
+                    help="open an empty job tab and find a way to close it (pause the agent first)")
     args = ap.parse_args()
 
-    if not args.inspect_queue and not args.dry_run:
+    if not args.inspect_queue and not args.dry_run and not args.probe_tab_close:
         sys.exit("This command only dry-runs now. Real rips go through the ledger:\n"
                  "  python -m ripauto.agent --once")
     if args.try_multi_add and not args.batch:
@@ -895,6 +1087,10 @@ def main():
                  "so Windows hides it from normal programs.")
 
     main_win, pid = connect()
+
+    if args.probe_tab_close:
+        probe_tab_close(main_win, pid)
+        return
 
     if args.inspect_queue:
         was_layout = layout_toolbar(main_win) is not None
