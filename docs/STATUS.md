@@ -46,7 +46,7 @@ Tests: `python -m unittest` from the repo root runs 168 on the printer PC (all p
 
 ## Step 6: what was built
 
-- **`agent --loop`:** fetch every 2 min, a cycle every 20 s, heartbeats throughout. It only touches PO-TRY when a run is ready, the PC has had no mouse or keyboard input for 60 s, and PO-TRY isn't ripping. Errors are logged, reported, PO-TRY is reconnected, and it carries on.
+- **`agent --loop`:** fetch every 2 min, a cycle every 20 s, heartbeats throughout. It only touches PO-TRY when a run is ready and PO-TRY isn't ripping. Since ~12:40 (needs one restart to go live) a 60 s corner warning comes first, replacing the old "60 s with no input" rule. Errors are logged, reported, PO-TRY is reconnected, and it carries on.
 - **Pause switch:** `tools\pause.cmd` / `tools\resume.cmd` (`state\PAUSE`). A run in progress finishes first; the dashboard shows "stopped" while paused.
 - **`tools\install_task.ps1`:** Task Scheduler "OSS RIP Agent": pythonw at logon, highest privileges, restart on failure. Also `uninstall_task.ps1` and `agent_status.cmd`.
 - **Log:** `state\agent.log`, rotated daily, 30 days kept.

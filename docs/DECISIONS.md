@@ -18,6 +18,18 @@ Newest first. Claude (chat) keeps this file; Claude Code adds entries when it de
 **Proven in the trial**
 - #47918 fetched and ripped hands-free, about 30 s from New to "RIP finished". See `trial/`.
 
+**Decided (Kevin + Code, ~12:40): corner rip warning, Rip now, Restart agent (built, not live until one restart)**
+- **Kevin:** "a windows status widget … in one of the four corners … for 60 seconds … a warning that an auto rip is imminent." Kevin also asked about a force-rip button.
+- **Built (`ripauto/warning.py`, `tools/rip_warning.pyw`):** when a run is ready, the agent shows an always-on-top popup in a screen corner (`warning_corner`, default bottom-right, above the taskbar).
+  - It reads **"Auto rip in 60 s"** (`warn_before_rip_s`), then the run's inches, sheet count and order numbers, and "hands off the mouse when it starts; nothing prints".
+  - Buttons: **Rip now** / **Wait 5 min** (`snooze_min`) / **Pause agent**.
+  - It's a no-activate tool window and hands focus back to whatever had it, so typing elsewhere isn't interrupted. Tested: Chrome kept the foreground while it was up.
+  - At zero it starts once mouse and keyboard have been still for **5 s** (`still_before_rip_s`), so it never grabs the mouse mid-movement. The popup closes just before the agent takes over.
+  - **This replaces "60 s with no input before a run"** (`require_idle_s` is gone). A person at the PC now gets 60 s notice and a choice, instead of the run silently waiting until they walk away.
+- **Rip now** (RIP Agent window, or the popup's button): drops `state\RIP_NOW`. The agent rips the next planned run even if it isn't full or due, after a 10 s popup countdown. Every safety stays: hand check, preview length gate, PO-TRY-busy check, pause.
+- **Restart agent** (RIP Agent window): drops `state\RESTART`. The loop exits at a safe point (between cycles, never mid-run or mid-countdown) with code 3, and Task Scheduler's restart-on-failure starts it again about a minute later with any new code. No admin needed.
+- **Not live yet:** the agent running since 12:26 loaded the old code. The switch needs one restart: this first time by Task Scheduler (End + Run) or an admin prompt, since the old code doesn't know the RESTART flag. After that, Restart agent works from the window.
+
 **Decided (Kevin + Code, after go-live): control window, and ripping by hand ahead of the agent**
 - **Kevin: "need a more intuitive way of enabling and disabling the agent."** A "RIP Agent" desktop shortcut (`tools\make_shortcut.ps1`) opens `tools\rip_agent_control.pyw`:
   - a coloured banner: ON (and what it's doing: next run time, or "Ripping #… 68%"), PAUSING (finishing the current run), PAUSED, OFF
