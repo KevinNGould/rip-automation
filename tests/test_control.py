@@ -37,6 +37,15 @@ class Describe(unittest.TestCase):
         held = dict(IDLE_NEXT, flags=[{"order": "#1"}, {"order": "#2"}])
         self.assertIn("2 sheets held", describe(True, False, held)["detail"])
 
+    def test_rip_now_only_when_it_makes_sense(self):
+        from ripauto.control import can_rip_now
+        self.assertTrue(can_rip_now(True, False, IDLE_NEXT))
+        self.assertFalse(can_rip_now(False, False, IDLE_NEXT))           # agent off
+        self.assertFalse(can_rip_now(True, True, IDLE_NEXT))             # paused
+        self.assertFalse(can_rip_now(True, False, {"state": "ripping"}))
+        self.assertFalse(can_rip_now(True, False, {"state": "idle"}))    # nothing waiting
+        self.assertFalse(can_rip_now(True, False, None))
+
     def test_dashboard_base(self):
         self.assertEqual(dashboard_base({"dashboard_url": "http://osshub.local:8085/api/heartbeat"}),
                          "http://osshub.local:8085")

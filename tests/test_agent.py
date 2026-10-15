@@ -267,8 +267,8 @@ class Cycle(unittest.TestCase):
     def test_waits_while_someone_uses_the_pc(self):
         self.env.add("a", 47930, 600.0)
         d = FakeDriver()
-        summary, _ = self.env.run(d, can_start=lambda: False)
-        self.assertEqual(summary["waiting"], "someone is using this PC")
+        summary, _ = self.env.run(d, can_start=lambda run: False)
+        self.assertEqual(summary["waiting"], "rip warning countdown")
         self.assertEqual((getattr(d, "row_reads", 0), d.calls), (0, []))
         self.assertEqual(L.status(self.env.ledger["a"]), L.QUEUED)
 

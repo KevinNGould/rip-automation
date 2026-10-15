@@ -35,8 +35,8 @@ class App:
         self.busy = False
         root.title(f"RIP Agent: {cfg.get('label', cfg['machine_id'])}")
         root.configure(bg=BG)
-        root.geometry("460x330")
-        root.minsize(400, 300)
+        root.geometry("460x400")
+        root.minsize(400, 360)
 
         self.banner = tk.Frame(root, bg=COLORS["wait"][0], padx=18, pady=14)
         self.banner.pack(fill="x")
@@ -53,7 +53,19 @@ class App:
                                 relief="flat", bg="#2c3038", fg=TEXT, activebackground="#3a3f47",
                                 activeforeground=TEXT, cursor="hand2", command=self.act)
         self.button.pack(fill="x", ipady=8)
-        self.note = tk.Label(body, text="", font=("Segoe UI", 9), bg=BG, fg=DIM, anchor="w")
+        row = tk.Frame(body, bg=BG)
+        row.pack(fill="x", pady=(8, 0))
+        self.rip_btn = tk.Button(row, text="Rip now", font=("Segoe UI", 11, "bold"), relief="flat",
+                                 bg="#2f6fd0", fg="#ffffff", activebackground="#2f6fd0",
+                                 activeforeground="#ffffff", disabledforeground="#8b919c",
+                                 cursor="hand2", command=self.do_rip_now)
+        self.rip_btn.pack(side="left", fill="x", expand=True, ipady=4)
+        self.restart_btn = tk.Button(row, text="Restart agent", font=("Segoe UI", 10), relief="flat",
+                                     bg=CARD, fg=TEXT, activebackground="#2c3038", activeforeground=TEXT,
+                                     disabledforeground="#6b717c", cursor="hand2", command=self.do_restart)
+        self.restart_btn.pack(side="left", padx=(8, 0), ipady=4, ipadx=8)
+        self.note = tk.Label(body, text="", font=("Segoe UI", 9), bg=BG, fg=DIM, anchor="w",
+                             justify="left", wraplength=420)
         self.note.pack(fill="x", pady=(6, 0))
 
         links = tk.Frame(body, bg=BG)
@@ -96,6 +108,16 @@ class App:
         self.detail.configure(text=info["detail"], fg=fg)
         if not self.busy:
             self.button.configure(text=info["button"], state="normal")
+        if info.get("rip_now_pending"):
+            self.rip_btn.configure(text="Rip now requested…", state="disabled", bg=CARD)
+        else:
+            ok = info.get("rip_now")
+            self.rip_btn.configure(text="Rip now", state="normal" if ok else "disabled",
+                                   bg="#2f6fd0" if ok else CARD)
+        if info.get("restart_pending"):
+            self.restart_btn.configure(text="Restarting…", state="disabled")
+        else:
+            self.restart_btn.configure(text="Restart agent", state="normal" if running else "disabled")
         self.log.configure(text="\n".join(lines) or "No log yet.")
 
     # ---- actions ----
@@ -117,6 +139,18 @@ class App:
                                             self.update_once()))
             threading.Thread(target=work, daemon=True).start()
             return
+        self.update_once()
+
+    def do_rip_now(self):
+        control.rip_now()
+        self.note.configure(text="Rip now: a 10-second countdown pops up in the corner, then it rips. "
+                                 "Hands off the mouse once it starts.")
+        self.update_once()
+
+    def do_restart(self):
+        control.request_restart()
+        self.note.configure(text="Restart requested. It stops at the next safe point (never mid-run) "
+                                 "and Task Scheduler starts it again about a minute later.")
         self.update_once()
 
     def open_dashboard(self):

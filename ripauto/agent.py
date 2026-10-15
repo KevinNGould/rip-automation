@@ -47,11 +47,16 @@ from .lock import AgentLock, agent_running
 from .planner import Limits, plan
 from .potry import RIPPING_STATUSES, parse_size_cell
 from .status import NullReporter, Reporter
+from .warning import RIP_NOW_PATH, Gate, Warner
 
 RUNS_DIR = STATE_DIR / "runs"
 PAUSE_PATH = STATE_DIR / "PAUSE"
 LOOP_EVERY_S = 20
+COUNTDOWN_TICK_S = 2          # while the rip warning is up, check more often
 ERROR_BACKOFF_S = 60
+COUNTDOWN = "rip warning countdown"
+RESTART_PATH = STATE_DIR / "RESTART"     # RIP Agent window "Restart agent" (picks up new code)
+RESTART_EXIT_CODE = 3
 
 
 class Stop(Exception):
@@ -190,7 +195,7 @@ def pick(runs, force, log):
 
 def cycle(cfg, ledger, driver, now, *, dl_names_fn, runs_dir=RUNS_DIR, save=lambda: None,
           dry_run=False, force=False, max_runs=1, log=print, reporter=None,
-          can_start=lambda: True, quiet=False):
+          can_start=lambda run: True, quiet=False):
     """One pass. driver needs .queue_rows() and .rip(pictures, planned_in, dry_run,
     on_progress). reporter (status.Reporter) gets every state change for the
     Pi dashboard. On a dry run the caller's ledger is left untouched.
@@ -229,8 +234,8 @@ def cycle(cfg, ledger, driver, now, *, dl_names_fn, runs_dir=RUNS_DIR, save=lamb
     chosen = pick(plan_and_hold(ledger, now, limits, save, log, quiet), force, log)
     if not chosen:
         return done("no run ready yet")
-    if not can_start():
-        return done("someone is using this PC")
+    if not can_start(chosen[0]):
+        return done(COUNTDOWN)
 
     reporter.update(state="planning")
     rows = driver.queue_rows()
@@ -392,8 +397,14 @@ def make_fetcher(cfg, secrets, log):
 
 def run_loop(cfg, ledger, driver, *, fetcher, dl_names_fn, reporter, save, log,
              pause_path=PAUSE_PATH, idle_s=seconds_since_input, clock=time.time,
-             now_fn=datetime.now, sleep=time.sleep, stop=None, runs_dir=RUNS_DIR):
+             now_fn=datetime.now, sleep=time.sleep, stop=None, runs_dir=RUNS_DIR,
+             warner=None, rip_now_path=RIP_NOW_PATH, restart_path=None):
     """Fetch every fetch_every_min, cycle every LOOP_EVERY_S, until stop is set.
+
+    Before a ready run starts, a corner popup warns "Auto rip in 60 s" (Gate in
+    ripauto/warning.py); at zero it starts once mouse and keyboard have been
+    still for a few seconds. state/RIP_NOW (the RIP Agent window's "Rip now")
+    rips the next run even if it isn't full or due, after a short countdown.
 
     Pause switch: while pause_path exists, nothing new starts; the loop reports
     'stopped' and checks again every 10 s. A run already in progress finishes
@@ -401,24 +412,37 @@ def run_loop(cfg, ledger, driver, *, fetcher, dl_names_fn, reporter, save, log,
     Errors are logged and reported, PO-TRY is reconnected, and the loop waits
     ERROR_BACKOFF_S before trying again; it never exits on its own."""
     stop = stop or threading.Event()
+    restart_path = restart_path or RESTART_PATH
     fetch_every = max(1, cfg.get("fetch_every_min", 2)) * 60
-    need_idle = cfg.get("require_idle_s", 60)
+    gate = Gate(warner or Warner(), idle_s=idle_s, clock=clock, pause_path=pause_path,
+                rip_now_path=rip_now_path, warn_s=cfg.get("warn_before_rip_s", 60),
+                still_s=cfg.get("still_before_rip_s", 5),
+                snooze_s=int(cfg.get("snooze_min", 5) * 60),
+                corner=cfg.get("warning_corner", "bottom-right"), log=log)
     last_fetch = None
     paused = False
     last_wait = None
-    log(f"Agent loop started (fetch every {fetch_every // 60} min, cycle every "
-        f"{LOOP_EVERY_S} s, needs {need_idle} s without mouse/keyboard before a run).")
+    log(f"Agent loop started (fetch every {fetch_every // 60} min, cycle every {LOOP_EVERY_S} s, "
+        f"{gate.warn_s} s corner warning before each run).")
     reporter.update(state="idle")
 
-    def can_start():
-        return not pause_path.exists() and idle_s() >= need_idle
-
     while not stop.is_set():
+        if restart_path.exists() and not gate.active:
+            # Safe point: between cycles, no countdown. Exit non-zero so Task
+            # Scheduler restarts us (a minute later) with any new code.
+            try:
+                restart_path.unlink()
+            except OSError:
+                pass
+            log("Restart requested: stopping now; Task Scheduler starts the agent again in about a minute.")
+            reporter.update(state="stopped", current_run=None)
+            return "restart"
         if pause_path.exists():
             if not paused:
                 log(f"Paused ({pause_path.name} exists). Delete it or run tools\\resume.cmd to carry on.")
                 reporter.update(state="stopped", current_run=None)
                 paused = True
+            gate.reset()
             sleep(10)
             continue
         if paused:
@@ -433,10 +457,20 @@ def run_loop(cfg, ledger, driver, *, fetcher, dl_names_fn, reporter, save, log,
                 added = fetcher(ledger)
                 if added:
                     log(f"Fetched {len(added)} new sheet(s).")
+            rip_now = rip_now_path.exists()
             summary = cycle(cfg, ledger, driver, now_fn(), dl_names_fn=dl_names_fn,
                             runs_dir=runs_dir, save=save, log=log, reporter=reporter,
-                            can_start=can_start, quiet=True)
-            if summary["waiting"] != last_wait and summary["waiting"] not in (None, "nothing queued"):
+                            can_start=gate, force=rip_now, quiet=True)
+            if summary["waiting"] != COUNTDOWN:
+                gate.reset()                       # run went, or isn't ready any more
+            if rip_now and summary["waiting"] != COUNTDOWN:
+                if summary["waiting"] in ("nothing queued", "no run ready yet"):
+                    log("Rip now: nothing is waiting to rip.")
+                try:
+                    rip_now_path.unlink()
+                except OSError:
+                    pass
+            if summary["waiting"] != last_wait and summary["waiting"] not in (None, "nothing queued", COUNTDOWN):
                 log(f"Waiting: {summary['waiting']}.")
             last_wait = summary["waiting"]
             if summary["stopped"]:
@@ -445,13 +479,15 @@ def run_loop(cfg, ledger, driver, *, fetcher, dl_names_fn, reporter, save, log,
             log(f"ERROR {type(e).__name__}: {e}")
             reporter.update(state="error", current_run=None,
                             last_error=f"{type(e).__name__}: {e}")
+            gate.reset()
             try:
                 driver.reset()
             except Exception:
                 pass
             sleep(ERROR_BACKOFF_S)
             continue
-        sleep(LOOP_EVERY_S)
+        sleep(COUNTDOWN_TICK_S if gate.active else LOOP_EVERY_S)
+    gate.reset()
     log("Agent loop stopped.")
 
 
@@ -534,13 +570,16 @@ def main():
     reporter = make_reporter(cfg, ledger, log)
     reporter.start()
     try:
-        run_loop(cfg, ledger, driver, fetcher=fetcher, dl_names_fn=dl_names,
-                 reporter=reporter, save=lambda: L.save(ledger), log=log)
+        result = run_loop(cfg, ledger, driver, fetcher=fetcher, dl_names_fn=dl_names,
+                          reporter=reporter, save=lambda: L.save(ledger), log=log)
     except KeyboardInterrupt:
         log("Stopped with Ctrl+C.")
+        result = None
     finally:
         reporter.stop("stopped")
         lock.__exit__(None, None, None)
+    if result == "restart":
+        sys.exit(RESTART_EXIT_CODE)       # non-zero: Task Scheduler's restart-on-failure kicks in
 
 
 if __name__ == "__main__":

@@ -1,3 +1,4 @@
+import json
 import os
 import tempfile
 import threading
@@ -7,6 +8,7 @@ from pathlib import Path
 
 from ripauto import ledger as L
 from ripauto.agent import run_loop
+from ripauto.warning import Warner
 from ripauto.lock import AgentLock, agent_running, lock_holder
 from ripauto.potry import rotate_log
 from tests.test_agent import CFG, FakeDriver, RecordingReporter
@@ -40,7 +42,10 @@ class Loop(unittest.TestCase):
         self.queue, self.runs = root / "queue", root / "runs"
         self.queue.mkdir()
         self.pause = root / "PAUSE"
-        self.cfg = dict(CFG, queue_dir=str(self.queue), fetch_every_min=2, require_idle_s=60)
+        self.rip_now = root / "RIP_NOW"
+        self.pending, self.response = root / "rip_pending.json", root / "rip_response.json"
+        self.cfg = dict(CFG, queue_dir=str(self.queue), fetch_every_min=2, warn_before_rip_s=60,
+                        still_before_rip_s=5, snooze_min=5)
         self.ledger = {}
         self.fetches = 0
         self.logs = []
@@ -73,27 +78,104 @@ class Loop(unittest.TestCase):
         run_loop(self.cfg, self.ledger, driver, fetcher=fetcher or self.fetcher(),
                  dl_names_fn=lambda: [], reporter=rep, save=lambda: None, log=self.logs.append,
                  pause_path=self.pause, idle_s=idle, clock=ft.clock, now_fn=lambda: NOW,
-                 sleep=ft.sleep, stop=stop, runs_dir=self.runs)
+                 sleep=ft.sleep, stop=stop, runs_dir=self.runs,
+                 warner=Warner(launch=False, pending=self.pending, response=self.response),
+                 rip_now_path=self.rip_now, restart_path=Path(self.tmp.name) / "RESTART")
         return rep, ft
+
+    def press(self, action):
+        """What the popup's buttons do."""
+        self.response.write_text(json.dumps({"action": action}))
 
     def test_fetches_on_start_then_every_two_minutes(self):
         self.loop(FakeDriver(), max_sleeps=13)      # 13 x 20 s = 260 s
         self.assertEqual(self.fetches, 3)            # t=0, 120, 240
 
-    def test_fetched_full_run_gets_ripped(self):
+    def test_fetched_full_run_gets_ripped_after_the_warning(self):
         d = FakeDriver()
-        rep, _ = self.loop(d, max_sleeps=2, fetcher=self.fetcher(new=("a", 47950, 600.0)))
+        seen = []
+
+        def watch(ft):
+            if self.pending.exists():
+                p = json.loads(self.pending.read_text())
+                seen.append((round(p["deadline"] - ft.t), p["planned_in"], p["orders"]))
+        rep, ft = self.loop(d, max_sleeps=40, fetcher=self.fetcher(new=("a", 47950, 600.0)),
+                            on_sleep=watch)
         self.assertEqual(len(d.calls), 1)
         self.assertEqual(L.status(self.ledger["a"]), L.RIPPED)
         self.assertIn("ripping", rep.states())
+        self.assertEqual(seen[0], (58, 600.0, ["#47950"]))      # countdown from 60 s, shown at once
+        self.assertTrue(any("Rip warning shown" in line for line in self.logs))
+        self.assertFalse(self.pending.exists())                   # popup closed once it started
 
-    def test_waits_for_the_pc_to_be_idle(self):
+    def test_at_zero_it_waits_for_a_still_mouse(self):
         self.add("a", 47950, 600.0)
         d = FakeDriver()
-        self.loop(d, max_sleeps=3, idle=lambda: 5)
+        messages = []
+        self.loop(d, max_sleeps=45, idle=lambda: 1,                # someone keeps using the PC
+                  on_sleep=lambda ft: messages.append(json.loads(self.pending.read_text())["message"])
+                  if self.pending.exists() else None)
         self.assertEqual(d.calls, [])
-        self.assertIn("Waiting: someone is using this PC.", self.logs)
+        self.assertEqual(messages[0], None)                        # counting down first
+        self.assertEqual(messages[-1], "Starting as soon as the mouse and keyboard are still")
+        self.assertFalse(self.pending.exists())                    # loop stopped: popup closed
         self.assertEqual(L.status(self.ledger["a"]), L.QUEUED)
+
+    def test_wait_5_min(self):
+        self.add("a", 47950, 600.0)
+        d = FakeDriver()
+        self.loop(d, max_sleeps=14, on_sleep=lambda ft: self.press("snooze") if ft.sleeps == 2 else None)
+        self.assertEqual(d.calls, [])                              # 14 sleeps < 5 min
+        self.assertIn("Rip warning: waiting 5 min (snoozed).", self.logs)
+        self.assertFalse(self.pending.exists())
+
+    def test_popup_rip_now_skips_the_wait(self):
+        self.add("a", 47950, 600.0)
+        d = FakeDriver()
+        self.loop(d, max_sleeps=6, idle=lambda: 0,                 # button click = mouse just moved
+                  on_sleep=lambda ft: self.press("now") if ft.sleeps == 1 else None)
+        self.assertEqual(len(d.calls), 1)
+
+    def test_popup_pause(self):
+        self.add("a", 47950, 600.0)
+        d = FakeDriver()
+        rep, _ = self.loop(d, max_sleeps=5, on_sleep=lambda ft: self.press("pause") if ft.sleeps == 1 else None)
+        self.assertEqual(d.calls, [])
+        self.assertTrue(self.pause.exists())
+        self.assertIn("stopped", rep.states())
+
+    def test_rip_now_flag_rips_a_partial_run(self):
+        self.add("a", 47950, 100.0)                                # not full, not due
+        self.rip_now.write_text("")
+        d = FakeDriver()
+        seen = []
+        rep, _ = self.loop(d, max_sleeps=10, on_sleep=lambda ft: seen.append(
+            json.loads(self.pending.read_text())["rip_now"]) if self.pending.exists() else None)
+        self.assertEqual(len(d.calls), 1)
+        self.assertTrue(seen and all(seen))                        # popup said "Rip now in …"
+        self.assertFalse(self.rip_now.exists())
+
+    def test_restart_request_exits_at_a_safe_point(self):
+        restart = Path(self.tmp.name) / "RESTART"
+        restart.write_text("")
+        stop = threading.Event()
+        ft = FakeTime(stop, 5)
+        result = run_loop(self.cfg, self.ledger, FakeDriver(), fetcher=self.fetcher(),
+                          dl_names_fn=lambda: [], reporter=RecordingReporter(), save=lambda: None,
+                          log=self.logs.append, pause_path=self.pause, idle_s=lambda: 600,
+                          clock=ft.clock, now_fn=lambda: NOW, sleep=ft.sleep, stop=stop,
+                          runs_dir=self.runs, warner=Warner(launch=False, pending=self.pending,
+                                                            response=self.response),
+                          rip_now_path=self.rip_now, restart_path=restart)
+        self.assertEqual(result, "restart")
+        self.assertFalse(restart.exists())
+        self.assertEqual(self.fetches, 0)
+
+    def test_rip_now_with_nothing_waiting(self):
+        self.rip_now.write_text("")
+        self.loop(FakeDriver(), max_sleeps=2)
+        self.assertIn("Rip now: nothing is waiting to rip.", self.logs)
+        self.assertFalse(self.rip_now.exists())
 
     def test_pause_switch(self):
         self.add("a", 47950, 600.0)
@@ -103,11 +185,13 @@ class Loop(unittest.TestCase):
         def resume_after_three(ft):
             if ft.sleeps == 3:
                 self.pause.unlink()
-        rep, _ = self.loop(d, max_sleeps=5, on_sleep=resume_after_three)
+        rep, _ = self.loop(d, max_sleeps=40, on_sleep=resume_after_three)   # + 60 s warning
         self.assertEqual(rep.states()[:2], ["idle", "stopped"])
         self.assertIn("Resumed.", self.logs)
         self.assertEqual(len(d.calls), 1)             # ripped only after the pause ended
-        self.assertEqual(self.fetches, 1)
+        self.assertGreaterEqual(self.fetches, 1)      # fetched only after the pause ended
+        self.assertLess(self.logs.index("Resumed."),
+                        next(i for i, line in enumerate(self.logs) if "Rip warning shown" in line))
 
     def test_pause_appearing_mid_cycle_blocks_the_next_run(self):
         self.add("a", 47950, 600.0)

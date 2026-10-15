@@ -118,7 +118,12 @@ def last_log_lines(n=4, path=LOG_PATH):
 def status(cfg):
     running = agent_running()
     paused = PAUSE_PATH.exists()
-    return describe(running, paused, fetch_heartbeat(cfg)), running, paused
+    hb = fetch_heartbeat(cfg)
+    info = describe(running, paused, hb)
+    info["rip_now"] = can_rip_now(running, paused, hb)
+    info["rip_now_pending"] = RIP_NOW_PATH.exists()
+    info["restart_pending"] = RESTART_PATH.exists()
+    return info, running, paused
 
 
 def pause():
@@ -131,6 +136,30 @@ def resume():
         PAUSE_PATH.unlink()
     except FileNotFoundError:
         pass
+
+
+RIP_NOW_PATH = STATE_DIR / "RIP_NOW"
+RESTART_PATH = STATE_DIR / "RESTART"
+
+
+def can_rip_now(running, paused, hb):
+    """Rip now makes sense when the agent is on, not paused, idle, and something waits."""
+    if not running or paused or not hb or hb.get("state") in ("ripping", "planning"):
+        return False
+    return bool((hb.get("queue_detail") or {}).get("next_run"))
+
+
+def rip_now():
+    """Ask the agent to rip the next run now (a 10 s popup countdown first)."""
+    RIP_NOW_PATH.parent.mkdir(parents=True, exist_ok=True)
+    RIP_NOW_PATH.write_text("from the RIP Agent window\n", encoding="utf-8")
+
+
+def request_restart():
+    """Ask the agent to restart at its next safe point (to load new code).
+    Task Scheduler starts it again about a minute later."""
+    RESTART_PATH.parent.mkdir(parents=True, exist_ok=True)
+    RESTART_PATH.write_text("from the RIP Agent window\n", encoding="utf-8")
 
 
 def start():
