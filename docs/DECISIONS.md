@@ -18,6 +18,21 @@ Newest first. Claude (chat) keeps this file; Claude Code adds entries when it de
 **Proven in the trial**
 - #47918 fetched and ripped hands-free, about 30 s from New to "RIP finished". See `trial/`.
 
+**Found and fixed (Code, ~12:30): OCR misread on the first live agent dry run**
+- Kevin's `agent --once --dry-run --force` on #47946 + #47947 (135.4 in planned) worked end to end:
+  - hand check, plan, multi-add of 2 files, F3, RIP, preview, Cancel
+  - ledger untouched
+- But OCR read the preview as `*2.500 inchk` and `135400 inch`. The pink tick touching the "2" merged into it, and the decimal point was lost. The gate saw 135400 in (over cap) and **cancelled, as it should**.
+- **Fix:**
+  - **Find the sheet:** locate the pink length line; its first pink pixel is the sheet's top edge.
+  - **Width:** OCR only the band above the sheet.
+  - **Length:** OCR only a thin strip around that line.
+  - **Clean the strips:** pink is painted out first, and no artwork is in view.
+  - **Lost decimal:** a 4+ digit value with no point gets one before its last three digits, since PO-TRY always prints three decimals (`135400` → 135.400).
+  - **Width check:** the width must be within 3 in of the 23 in canvas, or the reading is rejected.
+- **Re-checked on all four previews captured so far** (Kevin's screenshot, both 3-sheet dry runs, this run): all read correctly (22.5 × 65.237 three times, 22.5 × 135.4). 131 tests pass.
+- Safety net unchanged: even a "clean" misread has to land within max(3 in, 1%) of the planned length and under the cap, or the run is cancelled.
+
 **Decided (Kevin, ~11:55): go-live floor**
 - Kevin has no undownloaded 8-color orders; the last one in, **#47942**, he already grabbed by hand. So **`start_from_order` = 47943**, set in `machine.json` on the 8-color PC. List-only fetch from #47943 shows 0 sheets, so nothing is waiting.
 - Hand check verified on real hand downloads: #47932, #47935, #47940 and #47942 all come back **by_hand** against Kevin's Downloads folder (read-only check). #47932 and #47935 were "free" at the 11:xx check, before Kevin downloaded them.
