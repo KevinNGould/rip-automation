@@ -2,7 +2,17 @@
 
 Claude Code rewrites this file at the end of every working session and pushes it. Chat reads this file first. Decisions and open questions live in `docs/DECISIONS.md`; the spec lives in `docs/SPEC.md`. Git history holds older versions of this file.
 
-**Last updated:** 2026-10-15, after applying chat's 10:xx answers to steps 1–3 · **HEAD:** see `git log -1`
+**Last updated:** 2026-10-15 ~10:50, step 4 started then **paused after an incident** · **HEAD:** see `git log -1`
+
+---
+
+## ⚠ Incident: read before anything else
+
+At 10:41–10:43 Code accidentally ran `fetch --download` with no floor and downloaded 20 backlog sheets (#43227 … #47874), plus part of #47887, before killing it. **Nothing was ripped and PO-TRY wasn't touched.** All 21 files are now in `C:\Users\kevin\Downloads\8color-hold-accidental-20261015`, and their ledger entries are `held`. Full list and cause: DECISIONS.md → "Incident".
+
+**This affects the go-live floor.** Those downloads probably flipped the app's counter to **1/1** on orders that may never have been printed. So "oldest order still at 1/0" no longer works as the floor test for orders up to #47887. Kevin needs to judge those orders by whether they were actually printed.
+
+Step 4 is paused until Kevin has seen this. Uncommitted work in progress: `ripauto/ledger.py` (ledger states). The `start_from_order` guard in `fetch.py` is not in yet.
 
 ---
 
@@ -13,7 +23,7 @@ Claude Code rewrites this file at the end of every working session and pushes it
 | 1. Skeleton, config split, port scripts | **Done.** Kevin verified `--inspect-queue` and the dry run on the printer PC (10:18). |
 | 2. Naming fix + PNG length + tests | **Done** |
 | 3. Planner + tests | **Done**, now on the new Q1 rules |
-| 4. Driver multi-file runs + length gate + hand-download check + `start_from_order` | **Not started. Plan approved by chat; waiting for Kevin's go-ahead** (and his `start_from_order` number) |
+| 4. Driver multi-file runs + length gate + hand-download check + `start_from_order` | **Go-ahead given; paused after the incident above.** `ledger.py` drafted, not committed |
 | 5–8 | Not started |
 
 Tests: `python -m unittest` from the repo root runs 66 tests, all passing.
