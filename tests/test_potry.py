@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 
 from ripauto.potry import (batch_pictures, copies_from_name, find_row, gate_reason,
-                           job_name_for, parse_size_cell, rip_state)
+                           job_name_for, multi_add_chunks, parse_size_cell, rip_state)
 from tests.helpers import png_bytes
 
 
@@ -35,19 +35,26 @@ class Sizes(unittest.TestCase):
 
 class Gate(unittest.TestCase):
     def test_ok(self):
-        self.assertIsNone(gate_reason((22.5, 601.0), 650, 588.0))
-        self.assertIsNone(gate_reason((22.5, 650.0), 650, 650.0))
+        # Kevin's 3-sheet dry runs, 2026-10-15 11:16 and 11:17.
+        self.assertIsNone(gate_reason((22.5, 65.237), 650, 65.197))
+        self.assertIsNone(gate_reason((22.5, 650.0), 650, 648.0))
 
     def test_unreadable(self):
         self.assertEqual(gate_reason(None, 650, 600), "preview length unreadable")
 
     def test_over_cap(self):
-        self.assertIn("over 650 in", gate_reason((22.5, 650.2), 650, 600))
+        self.assertIn("over 650 in", gate_reason((22.5, 650.2), 650, 648))
 
-    def test_much_shorter_than_planned(self):
-        self.assertIn("may not have loaded", gate_reason((22.5, 300.0), 650, 600.0))
-        self.assertIsNone(gate_reason((22.5, 590.0), 650, 600.0))   # within 30 in (5%)
-        self.assertIsNone(gate_reason((22.5, 1.0), 650, 10.0))      # within 12 in
+    def test_missing_picture(self):
+        # The 6 in sheet (7.2 in + 1 in gap) missing from the 3-sheet run.
+        self.assertIn("may not have loaded", gate_reason((22.5, 57.0), 650, 65.197))
+        # 1% of 600 = 6 in tolerance on a long run.
+        self.assertIsNone(gate_reason((22.5, 595.0), 650, 600.0))
+        self.assertIn("may not have loaded", gate_reason((22.5, 591.0), 650, 600.0))
+
+    def test_doubled_picture(self):
+        self.assertIn("loaded twice", gate_reason((22.5, 73.5), 650, 65.197))
+        self.assertIsNone(gate_reason((22.5, 67.5), 650, 65.197))   # within 3 in
 
 
 class Naming(unittest.TestCase):
@@ -62,6 +69,17 @@ class Naming(unittest.TestCase):
                 {"Job name": "47920-b-(1)", "Establishing time": "2026-10-15 12:00:06"}]
         self.assertEqual(find_row(rows, "47918-a-(1)", "2026-10-15 12:00:00"), rows[1])
         self.assertIsNone(find_row(rows, "47918-a-(1)", "2026-10-15 13:00:00"))
+
+    def test_find_row_by_any_picture_name(self):
+        rows = [{"Job name": "47920-b-(1)", "Establishing time": "2026-10-15 12:00:06"}]
+        self.assertEqual(find_row(rows, ["47918-a-(1)", "47920-b-(1)"], "2026-10-15 12:00:00"),
+                         rows[0])
+
+    def test_multi_add_chunks(self):
+        files = [Path(f"{n}.png") for n in range(23)]
+        self.assertEqual([len(c) for c in multi_add_chunks(files)], [10, 10, 3])
+        self.assertEqual(multi_add_chunks(files[:1]), [])
+        self.assertEqual([len(c) for c in multi_add_chunks(files[:11])], [10])  # 1 left: single Add
 
     def test_copies_from_name(self):
         self.assertEqual(copies_from_name(Path("47918-1-22in x 12in 1ft-1-(3).png")), 3)

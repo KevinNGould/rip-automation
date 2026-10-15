@@ -113,7 +113,12 @@ def num(text):
 # Queue statuses seen so far. Add new ones here as they show up.
 RIPPING_STATUSES = ("Ripping",)
 DONE_STATUSES = ("RIP finished", "Transmission finished")
-LENGTH_SHORTFALL_IN = 12.0   # preview this much shorter than planned -> a picture may be missing
+# Preview length vs planned: off by more than max(this, 1%) either way means a
+# picture is missing or doubled. The smallest sheet (6 in + label strip + gap)
+# is about 8 in. Kevin's 3-sheet dry runs: planned 65.197, preview 65.237.
+LENGTH_TOLERANCE_IN = 3.0
+LENGTH_TOLERANCE_PCT = 0.01
+MULTI_ADD_CHUNK = 10         # files per Add dialog, to keep the name box short
 
 
 def rip_state(status, processing):
@@ -149,10 +154,22 @@ def gate_reason(size, cap_in, planned_in):
     w, l = size
     if l > cap_in or w > cap_in:
         return f"preview shows {l:.1f} in, over {cap_in:g} in"
-    if planned_in and l < planned_in - max(LENGTH_SHORTFALL_IN, 0.05 * planned_in):
-        return (f"preview shows {l:.1f} in but {planned_in:.1f} in was planned "
-                f"(a picture may not have loaded)")
+    if planned_in:
+        tolerance = max(LENGTH_TOLERANCE_IN, LENGTH_TOLERANCE_PCT * planned_in)
+        if l < planned_in - tolerance:
+            return (f"preview shows {l:.1f} in but {planned_in:.1f} in was planned "
+                    f"(a picture may not have loaded)")
+        if l > planned_in + tolerance:
+            return (f"preview shows {l:.1f} in but {planned_in:.1f} in was planned "
+                    f"(a picture may have loaded twice)")
     return None
+
+
+def multi_add_chunks(distinct):
+    """Groups of 2..MULTI_ADD_CHUNK distinct files for one Add dialog each.
+    A lone file left over goes through a normal single Add."""
+    chunks = [distinct[i:i + MULTI_ADD_CHUNK] for i in range(0, len(distinct), MULTI_ADD_CHUNK)]
+    return [c for c in chunks if len(c) > 1]
 
 
 def job_name_for(pictures):
@@ -392,31 +409,36 @@ def read_queue(main):
     return [rows[k] for k in sorted(rows)]
 
 
-def find_row(rows, job_name, started):
-    """The newest queue row for this job made at or after started."""
+def find_row(rows, job_names, started):
+    """The newest queue row made at or after started whose job name starts with
+    any of job_names (PO-TRY names a job after whichever picture came first,
+    which with multi-add may not be the first in the run's list)."""
+    if isinstance(job_names, str):
+        job_names = [job_names]
     best = None
     for row in rows or []:
-        if row.get("Job name", "").replace("\n", "").strip().startswith(job_name):
+        name = row.get("Job name", "").replace("\n", "").strip()
+        if any(name.startswith(j) for j in job_names):
             made = row.get("Establishing time", "")
             if not made or made >= started:
                 best = row
     return best
 
 
-def wait_for_rip(main, job_name, started_str, started_ts):
+def wait_for_rip(main, job_names, started_str, started_ts):
     """Wait until the job's queue row says the rip is done; return that row
     (or {} when only the PrnList fallback could tell)."""
     show_queue(main)
     time.sleep(SETTLE)
     if read_queue(main) is None:
-        wait_for_prn(job_name, started_ts)
+        wait_for_prn(job_names, started_ts)
         return {}
 
     end = time.time() + RIP_TIMEOUT
     last = None
     seen = False
     while time.time() < end:
-        row = find_row(read_queue(main), job_name, started_str)
+        row = find_row(read_queue(main), job_names, started_str)
         if row:
             seen = True
             status = row.get("Status", "")
@@ -440,14 +462,14 @@ def wait_for_rip(main, job_name, started_str, started_ts):
     raise Stop("the rip didn't finish in time")
 
 
-def wait_for_prn(job_name, started_ts):
+def wait_for_prn(job_names, started_ts):
     """Fallback when the queue table can't be read: watch PrnList for the .prn
     to appear and stop growing for 30 seconds."""
     log("  can't read the queue table; watching PrnList instead")
     end = time.time() + RIP_TIMEOUT
     last_size, stable_since = None, None
     while time.time() < end:
-        prns = [p for p in PRN_DIR.glob(f"{glob_escape(job_name)}*.prn")
+        prns = [p for j in job_names for p in PRN_DIR.glob(f"{glob_escape(j)}*.prn")
                 if p.stat().st_mtime >= started_ts - 5]
         if prns:
             size = max(prns, key=lambda p: p.stat().st_mtime).stat().st_size
@@ -555,12 +577,16 @@ def add_picture(main, pid, path):
     wait_loaded(main)
 
 
+class MultiAddRefused(Stop):
+    """The Add dialog wouldn't take several names; nothing was added."""
+
+
 def add_pictures_together(main, pid, paths):
-    """Experiment (SPEC §7 step 2): several files in one Add, the way a person
-    would multi-select. Only used with --try-multi-add on a dry run."""
+    """Several files in one Add, the way a person would multi-select (SPEC §7
+    step 2). Proven on Kevin's 3-sheet dry run, 2026-10-15 11:17."""
     folder = paths[0].parent
     if any(p.parent != folder for p in paths):
-        raise Stop("multi-add needs all files in one folder")
+        raise MultiAddRefused("multi-add needs all files in one folder")
     dlg = open_add_dialog(main, pid)
     box = fill_name_box(dlg, str(folder))
     box.type_keys("{ENTER}")                      # go to the folder first
@@ -573,7 +599,7 @@ def add_pictures_together(main, pid, paths):
             dlg.type_keys("{ESC}")
         except Exception:
             pass
-        raise Stop("the Add dialog didn't take several files at once")
+        raise MultiAddRefused("the Add dialog didn't take several files at once")
     wait_loaded(main)
 
 
@@ -653,16 +679,18 @@ def rip_pictures(main, pid, pictures, cfg, planned_in, dry_run,
     show_layout(main)
     new_job(main)
     log("  new job")
+    pictures_to_add = list(pictures)
     if multi_add:
         distinct = list(dict.fromkeys(pictures))
-        add_pictures_together(main, pid, distinct)
-        log(f"  multi-add took {len(distinct)} file(s) in one go")
-        extra = list(pictures)
-        for p in distinct:
-            extra.remove(p)
-        pictures_to_add = extra
-    else:
-        pictures_to_add = list(pictures)
+        for chunk in multi_add_chunks(distinct):
+            try:
+                add_pictures_together(main, pid, chunk)
+            except MultiAddRefused as e:
+                log(f"  multi-add refused ({e}); adding the rest one at a time")
+                break
+            for p in chunk:
+                pictures_to_add.remove(p)
+            log(f"  multi-add took {len(chunk)} file(s) in one go")
     for i, p in enumerate(pictures_to_add, 1):
         add_picture(main, pid, p)
         log(f"  added {i}/{len(pictures_to_add)}  {p.name}")
@@ -699,7 +727,11 @@ def rip_pictures(main, pid, pictures, cfg, planned_in, dry_run,
     press(print_btn, opens_dialog=True)
     wait_for(lambda: not find_preview(main, pid), 60, "the preview to close")
     log("  rip started")
-    result["row"] = wait_for_rip(main, job, started_str, started_ts)
+    stems = [Path(p).stem for p in dict.fromkeys(pictures)]
+    result["row"] = wait_for_rip(main, stems, started_str, started_ts)
+    actual_name = (result["row"].get("Job name") or "").replace("\n", "").strip()
+    if actual_name:
+        result["job_name"] = actual_name        # what PO-TRY actually called it
     result["ended"] = datetime.now().isoformat(timespec="seconds")
     log(f"  rip done; queue size {result['row'].get('Size (inch)', '?')}")
     show_layout(main)

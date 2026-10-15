@@ -272,7 +272,8 @@ class PotryDriver:
     def rip(self, pictures, planned_in, dry_run):
         try:
             return self.potry.rip_pictures(self.main, self.pid, pictures, self.cfg,
-                                           planned_in, dry_run)
+                                           planned_in, dry_run,
+                                           multi_add=self.cfg.get("multi_add", True))
         except self.potry.Stop as e:
             raise Stop(str(e)) from None
 
