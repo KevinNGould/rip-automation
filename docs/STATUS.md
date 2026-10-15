@@ -18,6 +18,10 @@ Claude Code rewrites this file at the end of every working session and pushes it
 
 Tests: `python -m unittest` from the repo root runs 149 on the printer PC (all pass; 7 dashboard tests skip without Flask). Those 7 pass on the hub Pi.
 
+## After step 5 (Kevin's request)
+
+The Operations Hub (:8081) now has a **RIP Automation** button and greys out **Production Command** (:8084). :8084 shows a "replaced by RIP Automation" popup. Details in DECISIONS.md. The :8081 change isn't seen visually yet, because it's behind the hub PIN.
+
 ## Step 5: what was built
 
 - **`ripauto/status.py`:** builds the SPEC §8 heartbeat from the ledger and run records. Free text (hold reasons, errors) is scrubbed of paths, links, emails, app file/job names, tokens and IDs. A `Reporter` sends on every state change plus every 30 s, and never stops a rip if the Pi is down.

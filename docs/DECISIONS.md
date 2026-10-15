@@ -18,6 +18,16 @@ Newest first. Claude (chat) keeps this file; Claude Code adds entries when it de
 **Proven in the trial**
 - #47918 fetched and ripped hands-free, about 30 s from New to "RIP finished". See `trial/`.
 
+**Decided (Kevin, after step 5): Production Command (:8084) retired in favour of RIP Automation (:8085)**
+- Kevin: :8084 (`oss_command.py`, "Production Command") was an earlier attempt at this and is now mostly redundant.
+- **Operations Hub (:8081, `oss_uptime.py`):**
+  - new **RIP Automation** button → `http://osshub.local:8085`
+  - the Production Command button is greyed out (grayscale, dashed, "Replaced by RIP Automation") but still clickable
+  - each external button now shows its real port; it used to say "Port 8080" for all
+- **:8084:** shows a popup on every visit: "Production Command has been replaced", with **Open RIP Automation** and **Stay here**. The page itself is unchanged and still runs.
+- Deployed to the hub with backups first (`~/oss_uptime.py.bak-20261015`, `~/oss_command.py.bak-20261015`). All six hub services were active after the restart. Those two files live outside this repo (`C:\Users\kevin\projects\`), so they aren't versioned here.
+- Not done: :8084's workstation-agent features (download ledger, scanner cross-reference, screenshots) weren't moved anywhere. Its service is still running. Retiring it fully (stopping the service, uninstalling `oss_ws_agent.exe` from the three PCs) is Kevin's call.
+
 **Decided (Code, step 5 build): heartbeat + Pi dashboard**
 - **Hub pattern followed** (from `oss_command.py`):
   - new independent service `oss_rip` (`dashboard/oss_rip.py`) on **osshub.local:8085**, its own systemd unit
