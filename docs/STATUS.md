@@ -2,7 +2,7 @@
 
 Claude Code rewrites this file at the end of every working session and pushes it. Chat reads this file first. Decisions and open questions live in `docs/DECISIONS.md`; the spec lives in `docs/SPEC.md`. Git history holds older versions of this file.
 
-**Last updated:** 2026-10-15 ~12:30, OCR misread fixed; next is Kevin re-running the agent dry run on #47946 + #47947 · **HEAD:** see `git log -1`
+**Last updated:** 2026-10-15 ~12:35, agent dry run on #47946 + #47947 passed (OCR gate ok); first real rip waits on Kevin's go-ahead · **HEAD:** see `git log -1`
 
 ## Latest (11:50): read this first
 
@@ -26,8 +26,11 @@ Claude Code rewrites this file at the end of every working session and pushes it
    - #47947 → 13.2 in
 
    `agent --plan`: one run of **135.4 in**, 2 pictures, `waiting` (not full; the flush comes 30 min after download).
-4. **Kevin, admin prompt:** first try ~12:2x ran end to end, but OCR misread the preview and the gate cancelled (correctly). OCR fixed ~12:30 (DECISIONS.md, "Found and fixed"). **← NOW: run it again:** `python -m ripauto.agent --once --dry-run --force`. This runs the hand check, plans, loads the first run, reads the preview and presses Cancel; the ledger stays untouched.
-5. **Kevin's go-ahead, admin prompt:** `python -m ripauto.agent --once --force`. This is the first real run: it rips (never prints), records the run, and moves the files to `ripped\{run-id}\`.
+4. ~~Kevin, admin prompt: agent dry run~~ **Passed ~12:35** on the re-run after the OCR fix:
+   - `preview size: (22.5, 135.4)   planned 135.4 in   gate: ok`, then Cancel; ledger untouched.
+   - F3 put the second sheet at Y = 122.2 (the 121.2 in sheet plus the 1.0 in gap), matching the plan exactly.
+   - (The first try at ~12:2x misread the OCR and cancelled; see DECISIONS.md.) The command was: `python -m ripauto.agent --once --dry-run --force`. This runs the hand check, plans, loads the first run, reads the preview and presses Cancel; the ledger stays untouched.
+5. **← NOW, waiting on Kevin's go-ahead. Admin prompt:** `python -m ripauto.agent --once --force`. This is the first real run: it rips (never prints), records the run, and moves the files to `ripped\{run-id}\`.
 
 ---
 
