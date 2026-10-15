@@ -18,6 +18,13 @@ Newest first. Claude (chat) keeps this file; Claude Code adds entries when it de
 **Proven in the trial**
 - #47918 fetched and ripped hands-free, about 30 s from New to "RIP finished". See `trial/`.
 
+**Decided (Kevin + Code, 11:3x): length gate reads the preview by OCR (option A), with the post-rip check (B) as a backstop**
+- Kevin's screenshot of the 3-sheet preview shows **`22.500 inch`** across the top and **`65.237 inch`** sideways down the left edge of the picture area, with all three sheets drawn. Length is the one that matters.
+- The driver captures the preview's picture area (`QGraphicsView`, a screenshot only) and runs Windows' built-in OCR (`tools/ocr_image.ps1`, en-US engine already on the 8-color PC). The image as-is gives the width; turned 90° counter-clockwise, it gives the length. On Kevin's screenshot, OCR returned exactly `22.500 inch` and `65.237 inch`. Gate rule: anything other than exactly one "N inch" in each pass is unreadable → Cancel and hold. OCR inputs are kept in `state/previews/` for checking.
+- **Backstop:** after the rip, the queue row's `Size (inch)` is checked. If it's over `cap_in`, the run is held with "delete it from the RIP queue by hand, don't print it". The agent never touches the queue toolbar.
+- **`gap_in` = 1.0** (was 0.5). Kevin's preview: 65.237 in for 63.197 in of artwork over 2 gaps = 1.02 in per gap. Every run record now stores `actual_in` and `gap_measured_in`, so this can be tuned from real runs.
+- This replaces SPEC §7 step 6's "find it via UIA" (not possible). The intent is unchanged: read the length off the preview before confirming. **Chat:** please update the spec wording.
+
 **Found (Code, from Kevin's 11:05 dry runs and probes)**
 - The 3-sheet batch dry run worked end to end: New → 3 Adds → F3 → RIP → preview → Cancel. Log: `state/rip_log.txt` on the 8-color PC.
 - **The Print preview exposes no size text to automation.** Its readable controls are all settings: driver, copies, error compensation, print-area margins, mirror/rotate, information output. The picture is drawn in a `QGraphicsView` that automation can't see into. So SPEC §7 step 6's "find it via UIA" can't be done, and the gate correctly reported "preview length unreadable" and cancelled both times. **As built, no real rip can happen: every run would be cancelled at the gate.** That's the safe state until the question under Open is decided.
@@ -101,7 +108,7 @@ Newest first. Claude (chat) keeps this file; Claude Code adds entries when it de
 - Replace the borrowed Pi paperwork-printer token with a dedicated Shopify app (read_orders, read_customers, Name access).
 - ~~(Code) "Matches two machines → refuse" can't be fully checked~~ settled: `config/machines.json`, built (see Code entry above).
 - ~~(Code) Printable width for 8-color?~~ settled: 23 in.
-- (Code) **DECISION NEEDED: how to check run length before confirming the rip** (SPEC §7 step 6 can't be done through automation; see "Found" above). Options:
+- ~~(Code) DECISION NEEDED: length gate~~ settled 11:3x: OCR on the preview + post-rip backstop (see above). Was: **how to check run length before confirming the rip** (SPEC §7 step 6 can't be done through automation; see "Found" above). Options:
   - **A. Windows OCR on the preview.** Take a screenshot of the preview's picture area and read it with Windows' built-in OCR. The en-US engine is present on the 8-color PC and Pillow is installed. This only works **if the preview actually draws "22.500 inch × 601.001 inch" somewhere**, which is unconfirmed. Code can check without risk: Kevin pauses a dry run at the preview, Code takes a screenshot and OCRs it (read-only), Kevin presses Enter, and the run Cancels.
   - **B. Rip, then check.** After Print, the queue row's `Size (inch)` (e.g. `22.500×601.001`) is readable. If it's over the cap, the agent holds the run and flags "delete this job from the RIP queue by hand"; it never touches the queue toolbar. Weaker: an over-cap job sits ripped in the queue until someone deletes it.
   - **C. Trust the planner with margin.** Calibrate `gap_in` from real runs, and plan to a lower ceiling (e.g. 640) so real length stays under 650. Use B as the backstop.
