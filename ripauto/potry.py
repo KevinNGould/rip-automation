@@ -180,8 +180,13 @@ def parse_size_cell(text):
     return (float(m.group(1)), float(m.group(2))) if m else None
 
 
-def gate_reason(size, cap_in, planned_in):
-    """Why the run must not be ripped, or None to go ahead (SPEC §7 step 6)."""
+def gate_reason(size, cap_in, planned_in, pictures=1, gap_in=0.0):
+    """Why the run must not be ripped, or None to go ahead (SPEC §7 step 6).
+
+    planned_in includes gap_in between every picture, but PO-TRY's F3 spacing
+    isn't constant: measured 1.02 in per gap on one run and 0.02 on another
+    (2026-10-15). So the preview may come out up to (pictures - 1) x gap_in
+    shorter than planned and still be fine; tolerance applies on top."""
     if size is None:
         return "preview length unreadable"
     w, l = size
@@ -189,7 +194,8 @@ def gate_reason(size, cap_in, planned_in):
         return f"preview shows {l:.1f} in, over {cap_in:g} in"
     if planned_in:
         tolerance = max(LENGTH_TOLERANCE_IN, LENGTH_TOLERANCE_PCT * planned_in)
-        if l < planned_in - tolerance:
+        no_gaps = planned_in - max(0, pictures - 1) * (gap_in or 0)
+        if l < no_gaps - tolerance:
             return (f"preview shows {l:.1f} in but {planned_in:.1f} in was planned "
                     f"(a picture may not have loaded)")
         if l > planned_in + tolerance:
@@ -747,7 +753,7 @@ def rip_pictures(main, pid, pictures, cfg, planned_in, dry_run,
         raise Stop("the preview's Print/Cancel buttons couldn't be confirmed")
 
     size = read_preview(preview, job, cfg.get("max_width_in"))
-    gate = gate_reason(size, cfg["cap_in"], planned_in)
+    gate = gate_reason(size, cfg["cap_in"], planned_in, len(pictures), cfg.get("gap_in", 0))
     log(f"  preview size: {size}   planned {planned_in:.1f} in   gate: {gate or 'ok'}")
     if "preview" in pause_at:
         pause("the Print preview")

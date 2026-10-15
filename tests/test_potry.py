@@ -52,6 +52,15 @@ class Gate(unittest.TestCase):
         self.assertIsNone(gate_reason((22.5, 595.0), 650, 600.0))
         self.assertIn("may not have loaded", gate_reason((22.5, 591.0), 650, 600.0))
 
+    def test_gaps_may_come_out_smaller_than_planned(self):
+        # 2026-10-15 13:00: 3 pictures, 195.0 in of artwork, planned 197.0 with
+        # 1 in gaps; the preview showed 195.037 (gaps ~0).
+        self.assertIsNone(gate_reason((22.5, 195.037), 650, 197.0, pictures=3, gap_in=1.0))
+        # A long run of 20 pictures with ~0 gaps is 19 in short of planned: still fine.
+        self.assertIsNone(gate_reason((22.5, 581.0), 650, 600.0, pictures=20, gap_in=1.0))
+        # ...but shorter than the artwork alone by more than the tolerance is not.
+        self.assertIn("may not have loaded", gate_reason((22.5, 570.0), 650, 600.0, pictures=20, gap_in=1.0))
+
     def test_doubled_picture(self):
         self.assertIn("loaded twice", gate_reason((22.5, 73.5), 650, 65.197))
         self.assertIsNone(gate_reason((22.5, 67.5), 650, 65.197))   # within 3 in
