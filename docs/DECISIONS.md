@@ -18,6 +18,28 @@ Newest first. Claude (chat) keeps this file; Claude Code adds entries when it de
 **Proven in the trial**
 - #47918 fetched and ripped hands-free, about 30 s from New to "RIP finished". See `trial/`.
 
+**Decided (Kevin + Code, after step 6): dashboard build-out and order search**
+- **Kevin asked for all four:** ripped log, queue & next run, stats & history, floor TV mode. The dashboard stays **display-only for now**; Kevin will add interactive features later.
+- **Kevin (mid-build), important:** "need to be able to search logs for when we're spread out across possibly 5 machines exactly maybe where specific jobs end up".
+  - **Built:** the Pi keeps an **order history** (`~/oss_rip.db`, SQLite, chmod 600) of every sighting in the cleaned heartbeats from every machine: waiting (sheet), ripped in run X (inches, pictures), cancelled at preview / stopped / over cap, found done by hand, held (reason). The header search box (`/#q=<digits>`, API `GET /api/search?q=`) shows each matching order's trail across machines, oldest first. Prefix search: "4794" finds #47940–#47949.
+  - On each printer PC, `python -m ripauto.find <order>` goes deeper locally: ledger state, the file's current path, runs, and every log line mentioning it.
+  - Limits: history starts at deploy time (2026-10-15 ~12:15). It only knows what an agent saw: a sheet done entirely by hand on a PC whose agent never noticed it won't appear. If the Pi is down for more than ~25 runs, the runs it missed are absent there; they're still in each PC's own run records.
+- **Heartbeat additions** (beyond SPEC §8's minimum, same privacy rules; the leak test covers each with data in it):
+  - `queue_detail`: each waiting sheet (order, sheet, copies, length, minutes waited, low-res), plus the next run (orders, planned inches, ready/reason, flush time, inches to full)
+  - `recent_runs`: last 25
+  - `by_hand`: last 25
+  - `history`: 30 days of inches / runs / sheets / by-hand
+
+  About 5 KB; the Pi's request cap went from 64 to 128 KB. The Pi re-cleans every new field: whitelist, order-number and date patterns, length caps.
+- **Views:**
+  - **Floor** (cards; click one for detail)
+  - **Machine detail** (`/#m=<id>`): tiles, Now, Next run with when it goes, Waiting table, Ripped log (agent runs + found by hand, newest first), inches-per-day bar chart for 30 days with hover tooltip and a table view
+  - **TV** (`/tv`): big numbers for a wall screen
+  - **Search**
+
+  Chart color `#3d8fe0` passed the dataviz validator on the dark card surface. Hand counts are a different measure, so they're in the tooltip and summary, not on a second axis.
+- **Note:** a machine whose agent isn't running shows **offline** 2 minutes after its last heartbeat. That's correct today, because the loop isn't installed yet.
+
 **Decided (Code, step 6 build): the agent loop**
 - **`python -m ripauto.agent --loop`:** fetch every `fetch_every_min` (2), a cycle every 20 s, heartbeats on every change plus every 30 s. Errors are logged and reported (`error` + last_error), PO-TRY is reconnected, and after a 60 s back-off it carries on; the loop never exits on its own. A failed fetch is retried at the normal 2-minute spacing.
 - **The loop stays out of PO-TRY unless it's about to rip.** People print from this PC's RIP queue, so a cycle first plans from the ledger alone. It only touches PO-TRY (to read the queue for the hand check, then rip) when all of these hold:

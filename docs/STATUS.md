@@ -2,7 +2,15 @@
 
 Claude Code rewrites this file at the end of every working session and pushes it. Chat reads this file first. Decisions and open questions live in `docs/DECISIONS.md`; the spec lives in `docs/SPEC.md`. Git history holds older versions of this file.
 
-**Last updated:** 2026-10-15, step 6 code done · **Waiting on Kevin to install the scheduled task (admin)** · next: dashboard build-out (Kevin asked) · **HEAD:** see `git log -1`
+**Last updated:** 2026-10-15 ~12:30 (printer PC clock) · step 6 code done + dashboard build-out live · **Waiting on Kevin to install the scheduled task (admin)** · **HEAD:** see `git log -1`
+
+## Latest: dashboard build-out + order search (live at http://osshub.local:8085)
+
+- **Floor → machine detail** (click a card): tiles, Now, Next run (when it goes), Waiting table, Ripped log (agent runs + found by hand), inches-per-day chart for 30 days with tooltip and table view.
+- **`/tv`:** big-number wall view.
+- **Order search across machines** (Kevin, "important"): the header search box finds an order's trail on every printer (waiting, ripped in which run, held, by hand) from the Pi's new order history (`~/oss_rip.db`). On a printer PC, `python -m ripauto.find <order>` gives the full local detail, including file path and log lines.
+- Still display-only (Kevin: interactive later). Checked in the browser: detail, chart, search (#4794 → #47946/#47947 ripped in run 8color-1-20261015-113554) and TV.
+- Details: DECISIONS.md, "dashboard build-out and order search". Tests: 168 on the printer PC + 10 dashboard tests on the Pi, all passing.
 
 ---
 
@@ -17,7 +25,7 @@ Claude Code rewrites this file at the end of every working session and pushes it
 | 7. Dedicated Shopify app | Not started (needs Kevin in Shopify's Dev Dashboard). |
 | 8. CMYK + UV | Not started (needs the routing fix first). |
 
-Tests: `python -m unittest` from the repo root runs 162 on the printer PC (all pass; 7 dashboard tests skip without Flask). Those 7 pass on the hub Pi.
+Tests: `python -m unittest` from the repo root runs 168 on the printer PC (all pass; 10 dashboard tests skip without Flask). Those 10 pass on the hub Pi.
 
 ## Step 6: what was built
 

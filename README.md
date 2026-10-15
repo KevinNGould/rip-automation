@@ -19,6 +19,7 @@ python -m ripauto.fetch --download               download new sheets (needs star
 python -m ripauto.agent --plan                   show how queued sheets would be batched
 python -m ripauto.agent --once --dry-run         one cycle, Cancel at the preview (admin)
 python -m ripauto.agent --once                   one real cycle: hand check, plan, rip (admin)
+python -m ripauto.find 47946                     where did this order go on this PC (ledger, runs, logs)
 python -m ripauto.potry --inspect-queue          read PO-TRY's RIP queue (admin)
 python -m ripauto.potry --dry-run --batch --folder F   load F's files as one job, Cancel (admin)
 python -m unittest                               run the tests
@@ -49,6 +50,12 @@ The loop:
 ## Pi dashboard (`dashboard/`)
 
 `oss_rip.py` runs on the hub Pi as the `oss_rip` service at http://osshub.local:8085. It's display-only; agents post heartbeats to `/api/heartbeat` with the key from `~/oss_rip_settings.json` (stored on each printer PC as `dashboard_key` in `config/secrets.json`).
+
+Views:
+- Floor (`/`): one card per machine.
+- Machine detail (`/#m=8color-1`): queue, next run, ripped log, 30-day chart.
+- Wall screen (`/tv`).
+- Order search (`/#q=47946`): the order's trail across every machine, from `~/oss_rip.db`.
 
 Deploy or update from the repo root on a printer PC:
 
