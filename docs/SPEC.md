@@ -87,7 +87,7 @@ Known risk: if someone downloads an 8-color order by hand *and* the agent fetche
 ## 5. Sheet facts
 
 - **Length** (inches) = PNG pixel height ÷ DPI from the PNG `pHYs` chunk. Fallbacks in order: `_Actual Height` attribute, then the number in the variant title. Store which source was used.
-- **Width** likewise; anything wider than the machine's printable width → hold.
+- **Width** likewise; anything wider than the machine's printable width → hold. 8-color: canvas is 23 in, so `max_width_in` = 23.
 - **Copies**: quantity N means N physical sheets. For batching, a sheet with qty N occupies N × length. **Open question Q1** (§11) is how to load them; default is to Add the same file N times to the job.
 
 ---
@@ -103,12 +103,13 @@ Per-machine settings (8-color values):
 - `flush_after_min` = 30 (Kevin: "after oldest waits X min"; X configurable).
 
 Rules:
-1. Never split a sheet. All N copies of a qty-N sheet go in the same run.
+1. Never split a single picture. Each copy of a qty-N sheet is its own picture. Keep a sheet's copies together when they fit in the run; otherwise the remaining copies go into the next run(s). (Kevin, 2026-10-15)
 2. Keep an order's sheets together when they fit; if an order's sheets together exceed the cap, they may go in consecutive runs.
 3. Fill oldest-first. Planned length = Σ(length × qty) + gap × (count − 1). Add the next sheet only if planned length stays ≤ `target_in + window_in` (648). After the oldest-first pass, try smaller later sheets to fill toward the target (first-fit), still ≤ 648.
 4. Rip a run when it's **full** (≥ 552), or when the **oldest sheet in it has waited ≥ flush_after_min**.
-5. A single sheet whose length × qty > cap: **hold**, flag "over 650 in", never rip. If qty pushes it over but one copy fits, still hold (needs a human decision; see Q1).
-6. Real-world check (§7 step 6) is the final word, not the plan.
+5. A single copy longer than the cap: **hold**, flag "over 650 in", never rip. If only the quantity pushes it over, split the copies across runs per rule 1; don't hold.
+6. Strictly first come, first served: lowest order number first, then position. No priority overrides. Low-res sheets rip normally and carry their flag to the dashboard.
+7. Real-world check (§7 step 6) is the final word, not the plan.
 
 Planner must be a pure function with unit tests: given sheets + now, return runs + holds.
 

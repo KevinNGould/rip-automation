@@ -18,6 +18,12 @@ Newest first. Claude (chat) keeps this file; Claude Code adds entries when it de
 **Proven in the trial**
 - #47918 fetched and ripped hands-free, about 30 s from New to "RIP finished". See `trial/`.
 
+**Decided (Kevin, 10:22): answers to Q1–Q3 and width**
+- **Q1 Quantity:** each copy is loaded as its own picture (Add the file N times). Keep a sheet's copies in one run when they fit; when they don't, the remaining copies go into the next run(s), oldest-first as usual. So copies **can** split across runs. A sheet is held only when a **single copy** won't fit under the cap. This replaces SPEC §6 rule 1's "all N copies in the same run" and the qty part of rule 5. (Kevin said "overrunning max width"; read as overrunning the run length, since copies stack lengthwise on a 23 in canvas. Flag it if the code suggests otherwise.)
+- **Q2 Low-res:** rip normally; carry the flag to the dashboard. No hold.
+- **Q3 Priority:** none. Strictly first come, first served: lowest order number first, then position. (This is what the planner already does.)
+- **Width:** 8-color canvas is 23 in and never changes; sheets come in around 22.1–22.5 in. Set `max_width_in` = 23 for 8-color; hold anything wider.
+
 **Verified on the printer PC (10:18)**
 - Ported driver passes both checks: `--inspect-queue` read 4 rows; dry run on the #47918 copy went New → load → F3 → preview → Cancel cleanly. Repo lives at `C:\Users\kevin\projects\rip-automation` on the 8-color PC.
 - New queue status seen: **"Transmission finished"** (Steve Springer's job, after it was printed). So statuses move on past "RIP finished" once a job is sent to the printer. For step 4: treat any later status as rip-complete too, since an operator may print before the agent polls. Collect the full set of status strings as they show up (likely something like "Transmitting" too) and keep them in one place in `potry.py`. For step 5: the dashboard can also report inches printed today from these statuses.
@@ -38,9 +44,6 @@ Newest first. Claude (chat) keeps this file; Claude Code adds entries when it de
 - Tests use stdlib `unittest` (`python -m unittest` from the repo root), because pytest isn't installed on the printer PC.
 
 **Open**
-- Q1 Quantity: Add the file N times into one job, or rip once with copies set? Can copies of one sheet split across runs if they don't fit together?
-- Q2 Low-res flagged sheets: rip with a flag, or hold?
-- Q3 Any queue-jumping priority (rush, pickup, tags)?
 - Q4 Is 30 min the right flush wait?
 - Q5 UV DTF product titles; caps and targets for CMYK and UV.
 - Q6 Computer names for each printer PC.
