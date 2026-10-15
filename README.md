@@ -37,7 +37,8 @@ powershell -ExecutionPolicy Bypass -File tools\install_task.ps1
 
 This registers "OSS RIP Agent": `pythonw -m ripauto.agent --loop` at logon, with highest privileges, restart on failure and no console window. It starts right away. Day to day:
 
-- `tools\pause.cmd` / `tools\resume.cmd`: pause switch. It finishes any run in progress, then waits and shows "stopped" on the dashboard.
+- **"RIP Agent" desktop shortcut** (made by `tools\make_shortcut.ps1`, no admin): a small window showing ON / PAUSING / PAUSED / OFF and what the agent is doing, with one big button: **Pause agent / Resume agent / Start agent**. Plus links to the dashboard and the log.
+- `tools\pause.cmd` / `tools\resume.cmd`: the same pause switch from a prompt. It finishes any run in progress, then waits and shows "stopped" on the dashboard.
 - `tools\agent_status.cmd`: task state, pause switch, last log lines.
 - `state\agent.log`: the log, rotated daily (30 days kept).
 - `tools\uninstall_task.ps1` (admin): remove it.
