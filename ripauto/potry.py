@@ -563,7 +563,11 @@ def new_job(main):
 
 AGENT_TABS_PATH = STATE_DIR / "agent_tabs.json"
 TAB_CLOSE_PATH = STATE_DIR / "potry_tab_close.json"
-TAB_CLOSE_METHODS = ("close_button", "context_menu", "middle_click", "ctrl_w", "ctrl_f4")
+TAB_CLOSE_METHODS = ("x_button", "close_button", "context_menu", "middle_click", "ctrl_w", "ctrl_f4")
+# The × PO-TRY draws at the right end of each job tab (Kevin's screenshot,
+# 2026-10-15) isn't exposed to UI automation, so it's clicked by position:
+# this many pixels in from the tab's right edge, vertically centred.
+X_OFFSETS = (12, 16, 9, 20)
 PROBE_VERBOSE = False         # the probe prints what it sees
 
 
@@ -611,6 +615,10 @@ def tab_close_method():
     return _read_json(TAB_CLOSE_PATH, {}).get("method")
 
 
+def tab_close_offset():
+    return _read_json(TAB_CLOSE_PATH, {}).get("x_offset")
+
+
 def answer_save_prompt(main, pid):
     """If closing a tab asks to save, answer No through a button named No /
     Don't save (never anything else). Returns True if it answered."""
@@ -626,12 +634,36 @@ def answer_save_prompt(main, pid):
     return False
 
 
-def try_close_tab(main, pid, name, method):
+LAST_X_OFFSET = [None]
+
+
+def try_close_tab(main, pid, name, method, x_offset=None):
     """One attempt with one method; True if the tab is gone afterwards."""
     tab = job_tab(main, name)
     if tab is None:
         return True
     try:
+        if method == "x_button":
+            r = tab.rectangle()
+            offsets = [x_offset] if x_offset else list(X_OFFSETS)
+            for dx in offsets:
+                x, y = r.right - dx, (r.top + r.bottom) // 2
+                if x <= r.left + (r.right - r.left) // 2:
+                    continue                            # never click outside the tab's × end
+                HANDS.check(f"before clicking × on {name}", need_front=True)
+                tab.click_input(coords=(x - r.left, y - r.top))
+                HANDS.mark()
+                time.sleep(1.5)
+                answer_save_prompt(main, pid)
+                time.sleep(0.5)
+                if job_tab(main, name) is None:
+                    LAST_X_OFFSET[0] = dx
+                    return True
+                tab = job_tab(main, name)
+                if tab is None:
+                    return True
+                r = tab.rectangle()
+            return False
         if method == "close_button":
             buttons = [b for b in tab.descendants(control_type="Button") if visible(b)]
             if not buttons:
@@ -697,7 +729,7 @@ def close_agent_tabs(main, pid, keep=()):
         for name in agent_tabs(pid):
             if name in keep:
                 continue
-            if try_close_tab(main, pid, name, method):
+            if try_close_tab(main, pid, name, method, x_offset=tab_close_offset()):
                 forget_tab(pid, name)
                 closed += 1
             else:
@@ -741,9 +773,11 @@ def probe_tab_close(main, pid):
         print(f"  {method:13} -> {'CLOSED' if ok else 'no'}")
         if ok:
             TAB_CLOSE_PATH.parent.mkdir(parents=True, exist_ok=True)
-            TAB_CLOSE_PATH.write_text(json.dumps({"method": method, "proven": datetime.now().isoformat(
-                timespec="seconds"), "potry_pid": pid}), encoding="utf-8")
-            print(f"Saved: the agent will close its own job tabs with '{method}'.")
+            TAB_CLOSE_PATH.write_text(json.dumps({"method": method, "x_offset": LAST_X_OFFSET[0],
+                                                  "proven": datetime.now().isoformat(timespec="seconds"),
+                                                  "potry_pid": pid}), encoding="utf-8")
+            extra = f" (× at {LAST_X_OFFSET[0]} px from the tab's right edge)" if method == "x_button" else ""
+            print(f"Saved: the agent will close its own job tabs with '{method}'{extra}.")
             return method
     print("None worked. The agent will keep leaving tabs open; tell Code.")
     return None
