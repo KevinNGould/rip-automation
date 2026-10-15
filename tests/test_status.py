@@ -5,11 +5,12 @@ from datetime import datetime
 from pathlib import Path
 
 from ripauto import ledger as L
-from ripauto.status import (NullReporter, Reporter, build_heartbeat, queue_summary, scrub,
-                            today_summary)
+from ripauto.status import (NullReporter, Reporter, build_heartbeat, by_hand_recent, history,
+                            queue_detail, queue_summary, recent_runs, scrub, today_summary)
 
 NOW = datetime(2026, 10, 15, 12, 0, 0).astimezone()
-CFG = {"machine_id": "8color-1", "label": "Printer #3 (8-color)"}
+CFG = {"machine_id": "8color-1", "label": "Printer #3 (8-color)", "cap_in": 650,
+       "target_in": 600, "window_in": 48, "gap_in": 1.0, "flush_after_min": 30}
 
 # Real-looking private data that must never reach the Pi.
 CUSTOMER = "Kaitlyn Carter"
@@ -88,6 +89,12 @@ class Leak(unittest.TestCase):
         self.assertIn("[path] not found", hb["last_error"])
         self.assertEqual(hb["current_run"]["orders"], ["#47946", "#47947"])
         self.assertEqual(set(hb["current_run"]), {"id", "orders", "planned_in", "progress_pct"})
+        # the dashboard-detail sections really were built from the leaky data (not empty)
+        self.assertEqual([s["order"] for s in hb["queue_detail"]["sheets"]], ["#47946", "#47947"])
+        self.assertIsNotNone(hb["queue_detail"]["next_run"])
+        self.assertEqual(hb["recent_runs"][0]["orders"], [])           # write_run has no orders
+        self.assertEqual([b["order"] for b in hb["by_hand"]], ["#47952"])
+        self.assertEqual(len(hb["history"]), 30)
 
     def test_scrub_examples(self):
         self.assertEqual(scrub(f"manual check: Downloads: {FILE} (x)"),
@@ -125,13 +132,43 @@ class Summaries(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             hb = build_heartbeat(CFG, {}, Path(d), state="idle", since=NOW, now=NOW, host="8-color")
         self.assertEqual(set(hb), {"machine_id", "label", "host", "agent_version", "state", "since",
-                                   "current_run", "today", "queue", "flags", "last_error", "sent_at"})
+                                   "current_run", "today", "queue", "flags", "last_error", "sent_at",
+                                   "queue_detail", "recent_runs", "by_hand", "history"})
         self.assertEqual((hb["state"], hb["current_run"], hb["flags"]), ("idle", None, []))
         self.assertEqual(build_heartbeat(CFG, {}, Path(d), state="bogus", since=NOW)["state"], "error")
 
     def test_flags_newest_first(self):
         flags = build_heartbeat(CFG, leaky_ledger(), Path("nowhere"), state="idle", since=NOW)["flags"]
         self.assertEqual([f["order"] for f in flags], ["#47948", "#47949", "#47950", "#47951"])
+
+
+class Detail(unittest.TestCase):
+    def test_queue_detail_and_next_run(self):
+        led = {"a": rec(47960, length_in=200.0, fetched_at="2026-10-15T11:40:00"),
+               "b": rec(47961, length_in=100.0, qty=2, fetched_at="2026-10-15T11:50:00"),
+               "c": rec(47962, status=L.RIPPED)}
+        q = queue_detail(CFG, led, NOW)
+        self.assertEqual([(s["order"], s["copies"], s["waited_min"]) for s in q["sheets"]],
+                         [("#47960", 1, 20), ("#47961", 2, 10)])
+        nr = q["next_run"]
+        self.assertEqual((nr["orders"], nr["planned_in"], nr["pictures"]), (["#47960", "#47961"], 402.0, 3))
+        self.assertEqual((nr["ready"], nr["reason"], nr["to_full_in"]), (False, "waiting", 150.0))
+        self.assertTrue(nr["flush_at"].startswith("2026-10-15T12:10:00"))   # oldest + 30 min
+        self.assertIsNone(queue_detail(CFG, {}, NOW)["next_run"])
+
+    def test_history_runs_and_by_hand(self):
+        recs = [{"outcome": "ripped", "ended": "2026-10-15T11:36:55", "actual_in": 135.4, "pictures": 2},
+                {"outcome": "ripped", "ended": "2026-10-14T09:00:00", "planned_in": 600.0, "pictures": 9},
+                {"outcome": "gate", "ended": "2026-10-15T10:00:00", "planned_in": 50.0, "pictures": 1},
+                {"outcome": "ripped", "ended": "2026-08-01T09:00:00", "actual_in": 1.0, "pictures": 1}]
+        led = {"h": rec(47970, status=L.BY_HAND, updated_at="2026-10-15T10:00:00")}
+        h = history(recs, led, NOW, days=3)
+        self.assertEqual([r["date"] for r in h], ["2026-10-13", "2026-10-14", "2026-10-15"])
+        self.assertEqual(h[1], {"date": "2026-10-14", "inches": 600.0, "runs": 1, "sheets": 9, "by_hand": 0})
+        self.assertEqual(h[2], {"date": "2026-10-15", "inches": 135.4, "runs": 1, "sheets": 2, "by_hand": 1})
+        rr = recent_runs(recs, limit=2)
+        self.assertEqual([r["outcome"] for r in rr], ["ripped", "gate"])   # newest two, newest first
+        self.assertEqual(by_hand_recent(led)[0]["order"], "#47970")
 
 
 class ReporterTest(unittest.TestCase):

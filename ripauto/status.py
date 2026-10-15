@@ -16,7 +16,7 @@ import re
 import socket
 import threading
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from . import __version__
@@ -111,10 +111,133 @@ def flags_from(ledger):
             for r in held[:MAX_FLAGS]]
 
 
+# ---------- dashboard detail: queue, next run, ripped log, history ----------
+# Same rules as above: order numbers, positions, counts, inches, times, states.
+
+MAX_RECENT = 25
+MAX_QUEUE = 60
+HISTORY_DAYS = 30
+
+
+def _naive(now):
+    return now.astimezone().replace(tzinfo=None) if now.tzinfo else now
+
+
+def _order(rec):
+    return str(rec.get("order", ""))[:12]
+
+
+def real_runs(runs_dir):
+    """Run records of real (not dry) runs, oldest first."""
+    out = []
+    for p in sorted(Path(runs_dir).glob("*.json")) if Path(runs_dir).exists() else []:
+        try:
+            rec = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not rec.get("dry_run"):
+            out.append(rec)
+    out.sort(key=lambda r: r.get("ended") or r.get("started") or "")
+    return out
+
+
+def recent_runs(records, limit=MAX_RECENT):
+    """Newest first: what each run was, how long, and how it ended."""
+    out = []
+    for r in reversed(records[-limit:]):
+        out.append({
+            "id": str(r.get("id", ""))[:60],
+            "ended": r.get("ended") or r.get("started"),
+            "orders": [str(o)[:12] for o in r.get("orders", [])][:40],
+            "pictures": r.get("pictures"),
+            "planned_in": r.get("planned_in"),
+            "actual_in": r.get("actual_in"),
+            "outcome": str(r.get("outcome", ""))[:12],      # ripped | gate | stopped | over_cap
+        })
+    return out
+
+
+def by_hand_recent(ledger, limit=MAX_RECENT):
+    """Sheets the hand check found taken by hand, newest first. 'at' is when the
+    agent noticed, not when the person downloaded or ripped it."""
+    recs = [r for r in ledger.values() if L.status(r) == L.BY_HAND]
+    recs.sort(key=lambda r: r.get("updated_at") or "", reverse=True)
+    return [{"order": _order(r), "position": r.get("position"), "copies": r.get("qty"),
+             "length_in": r.get("length_in"), "at": r.get("updated_at")} for r in recs[:limit]]
+
+
+def history(records, ledger, now, days=HISTORY_DAYS):
+    """One row per day for the last `days` days (oldest first, zeros included):
+    inches/runs/sheets ripped by the agent, and sheets found taken by hand."""
+    today = _naive(now).date()
+    rows = {}
+    for i in range(days - 1, -1, -1):
+        d = (today - timedelta(days=i)).isoformat()
+        rows[d] = {"date": d, "inches": 0.0, "runs": 0, "sheets": 0, "by_hand": 0}
+    for r in records:
+        if r.get("outcome") != "ripped":
+            continue
+        d = str(r.get("ended") or r.get("started") or "")[:10]
+        if d in rows:
+            rows[d]["inches"] = round(rows[d]["inches"] + (r.get("actual_in") or r.get("planned_in") or 0), 1)
+            rows[d]["runs"] += 1
+            rows[d]["sheets"] += r.get("pictures") or 0
+    for rec in ledger.values():
+        if L.status(rec) == L.BY_HAND:
+            d = str(rec.get("updated_at") or "")[:10]
+            if d in rows:
+                rows[d]["by_hand"] += 1
+    return list(rows.values())
+
+
+def queue_detail(cfg, ledger, now):
+    """Every waiting sheet, and the next run the planner would make with when it goes."""
+    from .planner import Limits, plan
+    naive = _naive(now)
+    sheets = []
+    for rec in ledger.values():
+        if L.status(rec) != L.QUEUED or L.copies_left(rec) <= 0:
+            continue
+        try:
+            waited = int((naive - datetime.fromisoformat(rec["fetched_at"])).total_seconds() // 60)
+        except (KeyError, ValueError):
+            waited = None
+        sheets.append({"order": _order(rec), "order_num": rec.get("order_num"),
+                       "position": rec.get("position"), "copies": L.copies_left(rec),
+                       "length_in": rec.get("length_in"), "waited_min": waited,
+                       "low_res": bool(rec.get("low_res"))})
+    sheets.sort(key=lambda s: (s["order_num"] or 0, s["position"] or 0))
+    for s in sheets:
+        s.pop("order_num")
+
+    next_run = None
+    try:
+        limits = Limits.from_config(cfg)
+        runs, _ = plan(L.queued_sheets(ledger), naive, limits)
+    except (KeyError, TypeError, ValueError):
+        runs = []
+    if runs:
+        r = runs[0]
+        oldest = min(i.sheet.ready_at for i in r.items)
+        next_run = {
+            "orders": r.orders[:40],
+            "planned_in": r.planned_in,
+            "pictures": r.pictures,
+            "ready": r.ready,
+            "reason": r.reason,                        # full | flush | waiting
+            "flush_at": _iso((oldest + timedelta(minutes=limits.flush_after_min)).astimezone()),
+            "to_full_in": round(max(0.0, limits.full_min - r.planned_in), 1),
+            "runs_planned": len(runs),
+        }
+    return {"sheets": sheets[:MAX_QUEUE], "more": max(0, len(sheets) - MAX_QUEUE),
+            "next_run": next_run}
+
+
 def build_heartbeat(cfg, ledger, runs_dir, *, state, since, current_run=None,
                     last_error=None, now=None, host=None):
     """The heartbeat dict (SPEC §8). Pure apart from reading run records."""
     now = now or _now()
+    records = real_runs(runs_dir)
     run = None
     if current_run:
         run = {"id": str(current_run.get("id", ""))[:60],
@@ -134,6 +257,11 @@ def build_heartbeat(cfg, ledger, runs_dir, *, state, since, current_run=None,
         "flags": flags_from(ledger),
         "last_error": scrub(last_error),
         "sent_at": _iso(now),
+        # dashboard detail (beyond SPEC §8's minimum; same privacy rules)
+        "queue_detail": queue_detail(cfg, ledger, now),
+        "recent_runs": recent_runs(records),
+        "by_hand": by_hand_recent(ledger),
+        "history": history(records, ledger, now),
     }
 
 
