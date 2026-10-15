@@ -2,15 +2,7 @@
 
 Claude Code rewrites this file at the end of every working session and pushes it. Chat reads this file first. Decisions and open questions live in `docs/DECISIONS.md`; the spec lives in `docs/SPEC.md`. Git history holds older versions of this file.
 
-**Last updated:** 2026-10-15 ~10:50, step 4 started then **paused after an incident** · **HEAD:** see `git log -1`
-
----
-
-## ⚠ Incident: read before anything else
-
-At 10:41–10:43 Code accidentally ran `fetch --download` with no floor and downloaded 20 backlog sheets (#43227 … #47874), plus part of #47887, before killing it. **Nothing was ripped and PO-TRY wasn't touched.** All 21 files are now in `C:\Users\kevin\Downloads\8color-hold-accidental-20261015`, and their ledger entries are `held`. Full list and cause: DECISIONS.md → "Incident".
-
-**Resolved with Kevin:** the range (#43227 from Aug 27 through #47874 from last night) was already downloaded and printed by hand, so the counters were already 1/1 and the floor reading is unaffected. Files stay held. Step 4 resumed.
+**Last updated:** 2026-10-15 afternoon, step 4 code done; waiting on Kevin's admin-prompt dry runs · **HEAD:** see `git log -1`
 
 ---
 
@@ -18,63 +10,71 @@ At 10:41–10:43 Code accidentally ran `fetch --download` with no floor and down
 
 | SPEC §12 step | State |
 |---|---|
-| 1. Skeleton, config split, port scripts | **Done.** Kevin verified `--inspect-queue` and the dry run on the printer PC (10:18). |
-| 2. Naming fix + PNG length + tests | **Done** |
-| 3. Planner + tests | **Done**, now on the new Q1 rules |
-| 4. Driver multi-file runs + length gate + hand-download check + `start_from_order` | **Go-ahead given; paused after the incident above.** `ledger.py` drafted, not committed |
+| 1–3 | **Done** |
+| 4. Driver multi-file runs + length gate + hand-download check + `start_from_order` | **Code done and unit-tested. PO-TRY dry runs not yet done** (needs Kevin at an admin prompt, below). No real multi-sheet rip yet. |
 | 5–8 | Not started |
 
-Tests: `python -m unittest` from the repo root runs 66 tests, all passing.
+Tests: `python -m unittest` from the repo root runs 121 tests, all passing.
 
-## This session (pulled chat's 4 commits, then)
+Earlier today: the 10:41 incident (backlog downloaded by mistake) is resolved. Those orders were already printed by hand; details are in DECISIONS.md.
 
-- **`config/machines.json`** (committed): lines `8color` / `cmyk` / `uv` with their product rules, and machines `8color-1` (enabled), `cmyk-1`, `cmyk-2`, `uv-1`, `uv-2` (off). Labels follow Kevin's shop map.
-- **`ripauto/config.py`:** loads `machines.json` and refuses to start in three cases:
-  - rules on two lines could match one title
-  - two machines on one line are enabled
-  - this PC's machine is unknown or switched off
+## Step 4: what was built
 
-  It merges this machine's line, label and rules into the config.
-- **`machine.json` (local and example):** `machine_id` is now `8color-1`, `max_width_in` is 23, and `label`, `product_rules` and `enabled` were removed. They now live only in `machines.json`; a leftover copy is refused.
-- **`ripauto/fetch.py`:** matches each title against every line's rules. A title that matches two rules stops the fetch; otherwise it keeps this line's items.
-- **`ripauto/planner.py`:** applies Kevin's Q1 answer.
-  - Each copy is its own picture.
-  - A sheet is held only when one copy is over 650 in.
-  - Copies split across runs only when together they're over the cap (how "when they fit" is read: DECISIONS → Code entry).
-  - Runs now list `RunItem(sheet, copies)`.
+- **`ripauto/ledger.py`:** sheet states `queued → in_run → ripped | held | by_hand`, plus `copies_ripped` so split copies finish over several runs.
+- **`ripauto/fetch.py`:** `--download` refuses to run without a floor (`start_from_order` in `machine.json`, or `--from`). New sheets enter the ledger as `queued`.
+- **`ripauto/handcheck.py`:** SPEC §4 check against PO-TRY queue job names and the top level of Downloads. It returns by_hand, manual or free, and it ignores the agent's own jobs.
+- **`ripauto/potry.py`:**
+  - `rip_pictures` loads one run as one job, one picture per copy.
+  - It reads the job size in the Print preview and applies the length gate: Cancel if the size is unreadable, over the cap, or far shorter than planned.
+  - Queue statuses are kept in one list; the row's `Size (inch)` is recorded as the actual length.
+  - This command is now dry-run/inspect only, with `--batch`, `--pause-at loaded,preview` and `--try-multi-add` for probing.
+- **`ripauto/agent.py`:** one cycle (`--once`):
+  1. Hold sheets left mid-run.
+  2. Hand check.
+  3. Plan.
+  4. Re-check each run just before it starts.
+  5. Rip, finish the ledger, move fully ripped files to `ripped\{run-id}\`, and write `state/runs/{run-id}.json`.
 
-## Verified
+  `--plan` shows the plan without touching PO-TRY or the ledger. `--dry-run` leaves the ledger untouched.
 
-- All 66 tests pass, including a check that the committed `machines.json` loads and that only `8color-1` is enabled.
-- Live list-only fetch with the new config: 29 sheets on unfulfilled orders, 28 not yet handled.
-- Planner pass over the live queue (lengths from titles/attributes, nothing downloaded): 637.1 / 605.5 / 645.1 in full runs, plus one 52.8 in sheet (#47935) waiting. No holds at 23 in width.
+## Verified (without PO-TRY)
 
-## Waiting on Kevin
+- All 121 unit tests pass, including a full simulated cycle with a fake PO-TRY. The cases covered:
+  - rip and move files, flush timing, `--force`
+  - dry run untouched, gate refusal, driver stop, interrupted run
+  - by hand in Downloads or the queue, manual check, unreadable queue
+  - the agent's own earlier job not counted as hand work
+  - split copies over two runs
+  - a missing file
+- The hand check against the real Downloads folder (read-only) marks #47905, #47914, #47927 and #47928 as already taken by hand. Only #47932 and #47935 are free.
+- Live `fetch` (list only) and `agent --plan` run. The plan is empty right now because nothing is queued until `start_from_order` is set and a download runs.
 
-1. **Go-ahead for step 4.**
-2. **`start_from_order`:** the oldest 8-color order still showing **1/0** in the app's Unfulfilled tab (SPEC §4 go-live floor).
+## Kevin: steps at an ADMINISTRATOR prompt in `C:\Users\kevin\projects\rip-automation`
 
-## Needs a decision / tidy (details in DECISIONS.md → Open)
+`C:\Users\kevin\Downloads\8color-dryrun` holds copies of three already-printed sheets (#47918 12 in, #47874 6 in, #47862 48 in; planned 64.2 in). Every step below presses **Cancel**, never Print. Hands off the mouse while it runs.
 
-- **Chat:** SPEC §3 and §4 still say product rules live in `machine.json`. Code follows §2 (`machines.json`); please tidy the wording.
-- **Chat/Kevin:** check the Q1 reading. Copies split only when they can't all fit under the cap, not merely when the current run is nearly full.
-- Still open: Q4 (flush minutes), Q5 (UV titles, CMYK/UV caps), Q6 (five PC host names), confirming that F3 lands, and the dedicated Shopify app.
+1. **Batch dry run, paused at the preview, for the probe:**
+   `python -m ripauto.potry --dry-run --batch --folder C:\Users\kevin\Downloads\8color-dryrun --pause-at loaded,preview`
+   At each PAUSED prompt, open a second admin prompt in the same folder and run `python tools\probe_potry.py`, then press Enter in the first. (Code reads `tools\potry_controls.txt` from disk afterwards. Running the probe twice overwrites it, so if you can, copy it to `potry_controls_loaded.txt` after the first pause.)
+2. **Multi-file Add experiment:**
+   `python -m ripauto.potry --dry-run --batch --folder C:\Users\kevin\Downloads\8color-dryrun --try-multi-add`
+3. Tell Code when they're done (or paste the end of `state\rip_log.txt`). Code then fixes the preview-size reading and picture count from the probe output.
 
-## Housekeeping notes
+**Also needed:** the `start_from_order` number (oldest 8-color order still at 1/0 in the app's Unfulfilled tab).
 
-- The new `config/secrets.json` still has default file permissions; the old trial `config.json` was locked to user `kevin`. Locking it is Kevin's call, so it's unchanged.
-- `C:\Users\kevin\Downloads\8color-dryrun` holds a copy of the #47918 sheet for dry runs. It can stay for step 4's dry runs.
+**After that, with Kevin's go-ahead** (not yet):
+- `python -m ripauto.fetch --download` (with the floor set)
+- `python -m ripauto.agent --once --dry-run --force`
+- then one real `python -m ripauto.agent --once --force`
 
-## Step 4 plan (approved by chat; updated with this session's spec changes)
+## Needs a decision / tidy (DECISIONS.md → Open)
 
-1. **Ledger states** per sheet: `queued` → `in_run` → `ripped` / `held` / `by_hand`. Because copies can now split, also track `copies_ripped`, so a sheet is `ripped` only when all its copies are done. The planner gets `qty − copies_ripped` as `Sheet.qty`. Run records go in `state/runs/{run-id}.json`.
-2. **`start_from_order`** in `machine.json`: fetch ignores orders below it, and `--from` still overrides it on the command line.
-3. **Hand-download check** (SPEC §4): before planning, and again right before each run starts, check two places:
-   - PO-TRY's queue rows (`{order#}-` prefix plus position)
-   - the top level of `hand_download_dir`, for an app-named file with the same order# and position
+- **Chat:** SPEC §3/§4 wording still puts product rules in `machine.json`. §3's layout should also list `ledger.py` and `handcheck.py`.
+- **Chat/Kevin:** confirm the Q1 reading (copies split only when they can't all fit under the cap).
+- **Open (Code):** closing job tabs after a run; whether multi-file Add works; how to count pictures in PO-TRY.
+- Still open: Q4–Q6, confirming that F3 lands, and the dedicated Shopify app.
 
-   Outcomes: `by_hand`, free, or held as "manual check". The decision logic is a pure function with a test for each outcome; reading the folder and the queue are thin wrappers around it.
-4. **Driver takes a run** (files × copies) instead of one PNG. First test whether the Add dialog accepts several files at once; if not, do one Add per picture. Confirm the loaded picture count; this needs a read-only probe while a multi-picture job is loaded.
-5. **Preview length gate:** a `--pause-at-preview` dry-run flag that waits for Enter before pressing Cancel, so `tools/probe_potry.py` can find the `… inch` text. Cancel and hold the whole run if the length is unreadable or over `cap_in`.
-6. **Queue statuses** kept in one list in `potry.py`. "RIP finished", "Transmission finished" and any later status count as done; new strings get added as they're seen.
-7. **Test runs:** dry-run a 2–3 sheet batch from copies in `8color-dryrun`, then one real run only with Kevin's go-ahead.
+## Housekeeping
+
+- `C:\Users\kevin\Downloads\8color-hold-accidental-20261015` holds the 21 files from the incident. Their ledger entries are `held`. Clear the folder whenever you like.
+- The new `config/secrets.json` still has default file permissions; locking it is Kevin's call.

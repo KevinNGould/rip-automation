@@ -18,6 +18,25 @@ Newest first. Claude (chat) keeps this file; Claude Code adds entries when it de
 **Proven in the trial**
 - #47918 fetched and ripped hands-free, about 30 s from New to "RIP finished". See `trial/`.
 
+**Decided (Code, step 4 build)**
+- **Real rips only through the ledger.** `python -m ripauto.potry` now only inspects and dry-runs (`--dry-run` is required). Real rips go through `python -m ripauto.agent --once`, which keeps the ledger, the hand check and the run records. The old "rip everything in the queue folder" path is gone, because it bypassed all three.
+- New modules not in SPEC §3's layout: `ripauto/ledger.py` (sheet states) and `ripauto/handcheck.py` (SPEC §4 check). `agent.py` has one cycle (`--once`) and `--plan`; the loop is step 6.
+- **Ledger states:** `queued → in_run → ripped | held | by_hand`, plus `copies_ripped` for split copies. A sheet goes back to `queued` until every copy is done, and its file stays in the queue folder until then. Entries without a status (the trial's #47918, `--mark-done`) are "untracked" and never planned. Sheets found `in_run` at the start of a cycle (an interrupted run) are held for a person, since nobody knows what PO-TRY did with them.
+- **Hand check details:**
+  - The agent's own jobs in PO-TRY's queue are recognized by their job name (first picture's file name, from the run records) and skipped, so copy 2 of a split sheet isn't mistaken for hand work.
+  - Per spec, an unreadable queue table holds every queued sheet as "manual check". That could be noisy if reading the table is flaky; watch it.
+  - `hand_download_dir` is a new `machine.json` key (8-color: `C:\Users\kevin\Downloads`). It must not equal `queue_dir`.
+  - A read-only check against the real Downloads folder (11:xx) found #47905, #47914, #47927 and #47928 already downloaded by hand; #47932 and #47935 came out free.
+- **Length gate:**
+  - It reads every text in the Print preview. It accepts either one text holding "W inch × L inch", or exactly two "N inch" texts (width first). If the first value is too wide to be the width, the pair is swapped.
+  - It cancels when the size is unreadable, over `cap_in`, or more than max(12 in, 5%) shorter than planned (a picture probably didn't load).
+  - The exact preview layout is unconfirmed until the probe runs at `--pause-at preview`.
+- **Picture count (SPEC §7 step 3):** not read from PO-TRY yet, because no control for it is known. For now each Add waits for the picture to load (W box > 0), and the gate's shortfall check catches a missing large picture. A probe at `--pause-at loaded` should show whether PO-TRY lists the pictures somewhere countable.
+- **Queue statuses:** kept in one list in `potry.py`. Done = a status containing "finish", or Processing at 100 with anything but "Ripping". Failed = "fail" or "error" in the status. Unknown statuses are logged so they can be added.
+- After a real rip, the run record keeps the queue row's `Size (inch)` (e.g. `22.500×601.001`) as the actual length.
+- **Dry runs** (`agent --once --dry-run`) leave the ledger untouched. They still write a run record named `…-dry`, which doesn't count as one of the agent's own jobs.
+- **Run IDs** look like `8color-1-20261015-133005`, with `-2`, `-3` added when one cycle rips several runs.
+
 **Incident (Code, 10:41–10:43): backlog downloaded by mistake**
 - While adding the `start_from_order` guard to `fetch --download`, Code ran `fetch --download` to see the guard refuse. The edit had silently failed to apply, so the old code ran with no floor and downloaded 20 sheets from the backlog, plus part of a 21st, before Code killed it. **Nothing was ripped; PO-TRY wasn't touched.**
 - Sheets downloaded: #43227, #47347, #47435, #47497, #47538, #47541, #47552, #47615, #47704, #47749, #47768, #47771, #47775, #47799, #47806, #47814, #47860, #47862 (both sheets), #47874. #47887 was cut off partway (the `.part` file).
@@ -74,6 +93,8 @@ Newest first. Claude (chat) keeps this file; Claude Code adds entries when it de
 - Replace the borrowed Pi paperwork-printer token with a dedicated Shopify app (read_orders, read_customers, Name access).
 - ~~(Code) "Matches two machines → refuse" can't be fully checked~~ settled: `config/machines.json`, built (see Code entry above).
 - ~~(Code) Printable width for 8-color?~~ settled: 23 in.
+- (Code) **Job tabs pile up** (one New per run, SPEC §7). Closing the run's tab isn't built yet; it needs a probe of the tab's close control.
+- (Code) **Multi-file Add:** `--try-multi-add` exists for the dry run; whether PO-TRY's dialog takes several files is still unknown.
 - (Code) **SPEC wording to tidy:** §3's config-split bullet still lists "label, product rules" under `machine.json`, and §4 says "Product rules come from `machine.json`". Both contradict §2 (rules live in `machines.json`). Code follows §2.
 - ~~(Code) Backlog cutoff~~ settled 10:31, see above. Was: **Backlog cutoff before go-live (step 6).** The live list shows 26 unhandled 8-color sheets on unfulfilled orders, going back to #43227. Most were presumably printed by hand already. Before the agent runs unattended, we need either `fetch --mark-done` (optionally with `--from`) or a `start_from_order` setting. Also #47914 was hand-downloaded during the verification, but the agent's ledger still shows it as new.
 

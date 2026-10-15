@@ -15,10 +15,13 @@ From the repo root:
 
 ```
 python -m ripauto.fetch                          list this machine's sheets (downloads nothing)
-python -m ripauto.fetch --download               download new sheets to queue_dir
+python -m ripauto.fetch --download               download new sheets (needs start_from_order)
+python -m ripauto.agent --plan                   show how queued sheets would be batched
+python -m ripauto.agent --once --dry-run         one cycle, Cancel at the preview (admin)
+python -m ripauto.agent --once                   one real cycle: hand check, plan, rip (admin)
 python -m ripauto.potry --inspect-queue          read PO-TRY's RIP queue (admin)
-python -m ripauto.potry --dry-run --limit 1      every step, Cancel instead of Print (admin)
+python -m ripauto.potry --dry-run --batch --folder F   load F's files as one job, Cancel (admin)
 python -m unittest                               run the tests
 ```
 
-Runtime files (ledger `state/processed.json`, `state/rip_log.txt`) live in `state/`, which is git-ignored.
+Runtime files (ledger `state/processed.json`, run records `state/runs/`, `state/rip_log.txt`) live in `state/`, which is git-ignored.
