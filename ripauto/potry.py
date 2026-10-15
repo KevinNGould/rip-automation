@@ -1,25 +1,28 @@
 """
 potry.py  -  PO-TRY driver (SPEC §7).
 
-Takes each PNG waiting in the queue folder (the one ripauto.fetch downloads
-into) and, one at a time:
-    New  ->  Add (pick the file)  ->  F3 intelligent layout, once
-    ->  RIP  ->  "Print" in the Print preview dialog (this only starts the rip)
-    ->  waits for "RIP finished"  ->  moves the PNG into  <queue>\\ripped
-then goes back to the layout view for the next one.
+rip_pictures() loads one run into PO-TRY as a single job:
+    New  ->  Add each picture (one per copy)  ->  F3 intelligent layout, once
+    ->  RIP  ->  read the job size in the Print preview (length gate)
+    ->  "Print" in the preview (this only starts the rip), or Cancel
+    ->  waits for the queue row to finish  ->  back to the layout view.
+ripauto.agent decides what goes in a run and keeps the ledger.
 
-It stops at the first thing that doesn't look right and leaves that file where
-it is. It never touches anything in the RIP queue screen's toolbar, and the
-only "Print" it ever presses is the one inside the Print preview dialog.
+It stops at the first thing that doesn't look right. It never touches anything
+in the RIP queue screen's toolbar, and the only "Print" it ever presses is the
+one inside the Print preview dialog.
 
 Ported from trial/rip_driver.py; PO-TRY paths and the queue folder come from
 config/machine.json and the log goes to state/rip_log.txt.
 
-Run from an ADMINISTRATOR Command Prompt in the repo root (PO-TRY runs as admin):
-  python -m ripauto.potry --inspect-queue        read the RIP queue table, rip nothing
-  python -m ripauto.potry --dry-run --limit 1    every step, but Cancel instead of Print
-  python -m ripauto.potry --limit 1              rip one sheet for real
-  python -m ripauto.potry                        rip everything in the queue folder
+This command only inspects and dry-runs; real rips go through
+python -m ripauto.agent --once. Run from an ADMINISTRATOR Command Prompt in
+the repo root (PO-TRY runs as admin):
+  python -m ripauto.potry --inspect-queue                 read the RIP queue, rip nothing
+  python -m ripauto.potry --dry-run --limit 1             one file, Cancel at the preview
+  python -m ripauto.potry --dry-run --batch --folder F    every file in F as ONE job
+      add --pause-at loaded,preview   to stop there for tools\\probe_potry.py
+      add --try-multi-add             to try one Add dialog for all files
 
 Hands off the mouse and keyboard while it runs (F3 needs PO-TRY in front).
 Ctrl+C in this window stops it.
@@ -31,7 +34,6 @@ import argparse
 import csv
 import io
 import re
-import shutil
 import subprocess
 import sys
 import time
@@ -44,6 +46,8 @@ except ImportError:          # checked in main(), so tests can import this modul
     Application = Desktop = None
 
 from .config import STATE_DIR, load_machine, load_or_exit
+from .planner import planned_length
+from .sheets import png_size_in
 
 LOG_PATH = STATE_DIR / "rip_log.txt"
 EXE_NAME = "MtFlatbedPrinterApp.exe"
@@ -102,6 +106,83 @@ def num(text):
         return None
     m = re.search(r"-?\d+(?:\.\d+)?", str(text))
     return float(m.group()) if m else None
+
+
+# ---------------- pure helpers (unit-tested) ----------------
+
+# Queue statuses seen so far. Add new ones here as they show up.
+RIPPING_STATUSES = ("Ripping",)
+DONE_STATUSES = ("RIP finished", "Transmission finished")
+LENGTH_SHORTFALL_IN = 12.0   # preview this much shorter than planned -> a picture may be missing
+
+
+def rip_state(status, processing):
+    """'done', 'working' or 'failed' for a queue row.
+
+    Anything after a finished rip counts as done (an operator may print before
+    the agent looks): a status containing 'finish', or Processing at 100 with
+    any status other than Ripping. 'fail'/'error' in the status is a failure."""
+    s = (status or "").strip()
+    low = s.lower()
+    if "fail" in low or "error" in low:
+        return "failed"
+    if s in DONE_STATUSES or "finish" in low:
+        return "done"
+    if num(processing) == 100 and s not in RIPPING_STATUSES:
+        return "done"
+    return "working"
+
+
+_PAIR = re.compile(r"(\d+(?:\.\d+)?)\s*(?:inch|in)?\s*[×xX*]\s*(\d+(?:\.\d+)?)\s*(?:inch|in)?", re.I)
+_ONE_INCH = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*inch(?:es)?\s*$", re.I)
+
+
+def parse_size_cell(text):
+    """'22.500×601.001' (queue Size column) -> (22.5, 601.001), else None."""
+    m = _PAIR.search(text or "")
+    return (float(m.group(1)), float(m.group(2))) if m else None
+
+
+def preview_size(texts, max_width_in=None):
+    """(width, length) in inches from the Print preview's UI texts, else None.
+
+    Accepts one text holding both ('22.500 inch × 601.001 inch') or exactly two
+    texts that are each just 'N inch', in UI order (width first). If the first
+    value is clearly too wide to be the width and the second isn't, they're
+    swapped. Anything else is unreadable: the gate cancels on unreadable."""
+    for t in texts:
+        t = t or ""
+        both = "×" in t or re.search(r"inch\s*[xX*]", t)
+        pair = parse_size_cell(t) if "inch" in t.lower() and both else None
+        if pair:
+            w, l = pair
+            break
+    else:
+        singles = [float(m.group(1)) for t in texts if (m := _ONE_INCH.match(t or ""))]
+        if len(singles) != 2:
+            return None
+        w, l = singles
+    if max_width_in and w > max_width_in + 1 and l <= max_width_in + 1:
+        w, l = l, w
+    return w, l
+
+
+def gate_reason(size, cap_in, planned_in):
+    """Why the run must not be ripped, or None to go ahead (SPEC §7 step 6)."""
+    if size is None:
+        return "preview length unreadable"
+    w, l = size
+    if l > cap_in or w > cap_in:
+        return f"preview shows {l:.1f} in, over {cap_in:g} in"
+    if planned_in and l < planned_in - max(LENGTH_SHORTFALL_IN, 0.05 * planned_in):
+        return (f"preview shows {l:.1f} in but {planned_in:.1f} in was planned "
+                f"(a picture may not have loaded)")
+    return None
+
+
+def job_name_for(pictures):
+    """PO-TRY names a job after its first picture's file name."""
+    return Path(pictures[0]).stem
 
 
 def visible(ctrl):
@@ -336,27 +417,31 @@ def read_queue(main):
     return [rows[k] for k in sorted(rows)]
 
 
-def find_row(rows, order_prefix, started):
+def find_row(rows, job_name, started):
+    """The newest queue row for this job made at or after started."""
     best = None
     for row in rows or []:
-        if row.get("Job name", "").replace("\n", "").startswith(order_prefix):
+        if row.get("Job name", "").replace("\n", "").strip().startswith(job_name):
             made = row.get("Establishing time", "")
             if not made or made >= started:
                 best = row
     return best
 
 
-def wait_for_rip(main, order_prefix, started_str, started_ts):
+def wait_for_rip(main, job_name, started_str, started_ts):
+    """Wait until the job's queue row says the rip is done; return that row
+    (or {} when only the PrnList fallback could tell)."""
     show_queue(main)
     time.sleep(SETTLE)
     if read_queue(main) is None:
-        return wait_for_prn(order_prefix, started_ts)
+        wait_for_prn(job_name, started_ts)
+        return {}
 
     end = time.time() + RIP_TIMEOUT
     last = None
     seen = False
     while time.time() < end:
-        row = find_row(read_queue(main), order_prefix, started_str)
+        row = find_row(read_queue(main), job_name, started_str)
         if row:
             seen = True
             status = row.get("Status", "")
@@ -366,23 +451,28 @@ def wait_for_rip(main, order_prefix, started_str, started_ts):
                 raise Stop(f"PO-TRY reported an error: {err}")
             if (status, prog) != last:
                 log(f"  {status or '?'}  {prog}")
+                if status and status not in RIPPING_STATUSES + DONE_STATUSES:
+                    log(f"  (new queue status seen: {status!r}; add it to potry.py)")
                 last = (status, prog)
-            if "finish" in status.lower():
-                return
+            state = rip_state(status, prog)
+            if state == "failed":
+                raise Stop(f"PO-TRY status: {status}")
+            if state == "done":
+                return row
         elif not seen and time.time() > end - RIP_TIMEOUT + 60:
             raise Stop("the job never appeared in the RIP queue")
         time.sleep(3)
     raise Stop("the rip didn't finish in time")
 
 
-def wait_for_prn(order_prefix, started_ts):
+def wait_for_prn(job_name, started_ts):
     """Fallback when the queue table can't be read: watch PrnList for the .prn
     to appear and stop growing for 30 seconds."""
     log("  can't read the queue table; watching PrnList instead")
     end = time.time() + RIP_TIMEOUT
     last_size, stable_since = None, None
     while time.time() < end:
-        prns = [p for p in PRN_DIR.glob(f"{order_prefix}*.prn")
+        prns = [p for p in PRN_DIR.glob(f"{glob_escape(job_name)}*.prn")
                 if p.stat().st_mtime >= started_ts - 5]
         if prns:
             size = max(prns, key=lambda p: p.stat().st_mtime).stat().st_size
@@ -393,6 +483,10 @@ def wait_for_prn(order_prefix, started_ts):
                 last_size, stable_since = size, time.time()
         time.sleep(3)
     raise Stop("the .prn file never finished")
+
+
+def glob_escape(text):
+    return re.sub(r"([\[\]*?])", r"[\1]", text)
 
 
 # ---------------- PO-TRY: the steps ----------------
@@ -427,7 +521,7 @@ def file_name_box(w):
             or next((e for e in edits if "file name" in name_of(e).lower()), None))
 
 
-def add_picture(main, pid, path):
+def open_add_dialog(main, pid):
     before = {window_key(w) for w in candidate_windows(main, pid)}
     press(tool_button(main, "Add"), opens_dialog=True)
 
@@ -453,24 +547,62 @@ def add_picture(main, pid, path):
                 pass
         log("  windows visible to the driver: " + ("; ".join(seen) or "none"))
         raise
+    return dlg
+
+
+def fill_name_box(dlg, text):
     box = file_name_box(dlg)
     if box is None:
         raise Stop("couldn't find the file name box in the open dialog")
     try:
-        box.set_edit_text(str(path))
+        box.set_edit_text(text)
     except Exception:
         box.set_focus()
         box.type_keys("^a{BACKSPACE}")
-        box.type_keys(re.sub(r"([+^%~(){}])", r"{\1}", str(path)), with_spaces=True)
+        box.type_keys(re.sub(r"([+^%~(){}])", r"{\1}", text), with_spaces=True)
     time.sleep(0.5)
+    return box
+
+
+def press_open(dlg, box):
     opens = [b for b in dlg.descendants(control_type="Button")
              if b.element_info.automation_id == "1" and visible(b)]
     if opens:
         press(opens[0])
     else:
         box.type_keys("{ENTER}")
-    wait_for(lambda: not visible(dlg), 30, "the file dialog to close")
 
+
+def add_picture(main, pid, path):
+    dlg = open_add_dialog(main, pid)
+    press_open(dlg, fill_name_box(dlg, str(path)))
+    wait_for(lambda: not visible(dlg), 30, "the file dialog to close")
+    wait_loaded(main)
+
+
+def add_pictures_together(main, pid, paths):
+    """Experiment (SPEC §7 step 2): several files in one Add, the way a person
+    would multi-select. Only used with --try-multi-add on a dry run."""
+    folder = paths[0].parent
+    if any(p.parent != folder for p in paths):
+        raise Stop("multi-add needs all files in one folder")
+    dlg = open_add_dialog(main, pid)
+    box = fill_name_box(dlg, str(folder))
+    box.type_keys("{ENTER}")                      # go to the folder first
+    time.sleep(SETTLE)
+    press_open(dlg, fill_name_box(dlg, " ".join(f'"{p.name}"' for p in paths)))
+    try:
+        wait_for(lambda: not visible(dlg), 30, "the file dialog to close")
+    except Stop:
+        try:
+            dlg.type_keys("{ESC}")
+        except Exception:
+            pass
+        raise Stop("the Add dialog didn't take several files at once")
+    wait_loaded(main)
+
+
+def wait_loaded(main):
     vals = layout_values(main)
     if num(vals.get("W")) is None:
         log("  can't read the W box; giving the picture a fixed 20 s to load")
@@ -490,13 +622,50 @@ def intelligent_layout(main):
     log(f"  F3 done  {fmt(layout_values(main))}")
 
 
-def rip_one(main, pid, png, dry_run, done_dir):
-    order_prefix = png.name.split("-", 1)[0] + "-"
-    log(f"=== {png.name}{'   (DRY RUN)' if dry_run else ''}")
+def preview_texts(preview):
+    texts = [name_of(preview)]
+    for d in preview.descendants():
+        t = name_of(d)
+        if t:
+            texts.append(t)
+    return texts
+
+
+def pause(point):
+    input(f"\n  PAUSED at {point}. Run  python tools\\probe_potry.py  in another "
+          f"administrator prompt now, then press Enter here to carry on... ")
+
+
+def rip_pictures(main, pid, pictures, cfg, planned_in, dry_run,
+                 pause_at=(), multi_add=False):
+    """Load pictures (one per copy) into one new job, F3, RIP, gate, confirm.
+
+    Returns {"job_name", "preview", "gate", "row", "started", "ended"}.
+    gate is None when the length gate passed. When it didn't, or on a dry run,
+    Cancel was pressed and nothing was ripped. Raises Stop when something
+    doesn't look right; then nobody knows how far PO-TRY got."""
+    job = job_name_for(pictures)
+    started = datetime.now()
+    log(f"=== run of {len(pictures)} picture(s), planned {planned_in:.1f} in, job {job}"
+        f"{'   (DRY RUN)' if dry_run else ''}")
     show_layout(main)
     new_job(main)
     log("  new job")
-    add_picture(main, pid, png)
+    if multi_add:
+        distinct = list(dict.fromkeys(pictures))
+        add_pictures_together(main, pid, distinct)
+        log(f"  multi-add took {len(distinct)} file(s) in one go")
+        extra = list(pictures)
+        for p in distinct:
+            extra.remove(p)
+        pictures_to_add = extra
+    else:
+        pictures_to_add = list(pictures)
+    for i, p in enumerate(pictures_to_add, 1):
+        add_picture(main, pid, p)
+        log(f"  added {i}/{len(pictures_to_add)}  {p.name}")
+    if "loaded" in pause_at:
+        pause("all pictures loaded, before F3")
     intelligent_layout(main)
 
     # Mark the time before RIP is pressed, so the queue row's timestamp is
@@ -508,30 +677,80 @@ def rip_one(main, pid, png, dry_run, done_dir):
     print_btn, cancel_btn = preview_buttons(preview)
     if not (print_btn and cancel_btn):
         raise Stop("the preview's Print/Cancel buttons couldn't be confirmed")
-    if dry_run:
+
+    texts = preview_texts(preview)
+    size = preview_size(texts, cfg.get("max_width_in"))
+    gate = gate_reason(size, cfg["cap_in"], planned_in)
+    log(f"  preview size: {size}   gate: {gate or 'ok'}")
+    if dry_run or size is None:
+        log("  preview texts: " + " | ".join(t for t in texts if t)[:2000])
+    if "preview" in pause_at:
+        pause("the Print preview")
+    result = {"job_name": job, "preview": size, "gate": gate, "row": None,
+              "started": started.isoformat(timespec="seconds"), "ended": None}
+
+    if dry_run or gate:
         press(cancel_btn, opens_dialog=True)
         wait_for(lambda: not find_preview(main, pid), 30, "the preview to close")
-        log("  preview found, pressed Cancel. Dry run complete for this sheet.")
-        return
+        log("  pressed Cancel" + (" (dry run)" if dry_run else f": {gate}"))
+        result["ended"] = datetime.now().isoformat(timespec="seconds")
+        show_layout(main)
+        return result
+
     press(print_btn, opens_dialog=True)
     wait_for(lambda: not find_preview(main, pid), 60, "the preview to close")
     log("  rip started")
-    wait_for_rip(main, order_prefix, started_str, started_ts)
-    done_dir.mkdir(parents=True, exist_ok=True)
-    shutil.move(str(png), str(done_dir / png.name))
-    log("  RIP finished; moved file to ripped\\")
+    result["row"] = wait_for_rip(main, job, started_str, started_ts)
+    result["ended"] = datetime.now().isoformat(timespec="seconds")
+    log(f"  rip done; queue size {result['row'].get('Size (inch)', '?')}")
     show_layout(main)
+    return result
+
+
+def copies_from_name(path):
+    """The (N) at the end of an app-style file name, default 1."""
+    m = re.search(r"\((\d+)\)\s*(?:\[\d+\])?$", path.stem)
+    return int(m.group(1)) if m else 1
+
+
+def batch_pictures(files, gap_in):
+    """A folder's PNGs as one run: each file x its (N) copies, and the planned length."""
+    pictures, inches = [], 0.0
+    for f in files:
+        n = copies_from_name(f)
+        size = png_size_in(f)
+        if size is None:
+            raise Stop(f"{f.name} has no DPI, can't plan its length")
+        pictures += [f] * n
+        inches += size[1] * n
+    return pictures, planned_length(inches, len(pictures), gap_in)
 
 
 # ---------------- main ----------------
 
 def main():
-    ap = argparse.ArgumentParser(description="Load queued sheets into PO-TRY and rip them.")
-    ap.add_argument("--dry-run", action="store_true", help="do every step but press Cancel")
-    ap.add_argument("--limit", type=int, default=0, help="max sheets this run")
+    ap = argparse.ArgumentParser(
+        description="Dry-run or inspect PO-TRY. Real rips go through: python -m ripauto.agent --once")
+    ap.add_argument("--dry-run", action="store_true", help="do every step but press Cancel (required)")
+    ap.add_argument("--limit", type=int, default=0, help="max files")
     ap.add_argument("--inspect-queue", action="store_true", help="read the RIP queue and exit")
-    ap.add_argument("--folder", help="queue folder (default: queue_dir in machine.json)")
+    ap.add_argument("--folder", help="folder of PNGs (default: queue_dir in machine.json)")
+    ap.add_argument("--batch", action="store_true",
+                    help="load every file (x its (N) copies) into ONE job, like a real run")
+    ap.add_argument("--pause-at", default="",
+                    help="comma list: loaded, preview. Waits for Enter so the probe can run")
+    ap.add_argument("--try-multi-add", action="store_true",
+                    help="with --batch: try adding all files in one Add dialog")
     args = ap.parse_args()
+
+    if not args.inspect_queue and not args.dry_run:
+        sys.exit("This command only dry-runs now. Real rips go through the ledger:\n"
+                 "  python -m ripauto.agent --once")
+    if args.try_multi_add and not args.batch:
+        sys.exit("--try-multi-add needs --batch")
+    pause_at = {p.strip() for p in args.pause_at.split(",") if p.strip()}
+    if pause_at - {"loaded", "preview"}:
+        sys.exit("--pause-at takes: loaded, preview")
 
     cfg = load_or_exit(load_machine)
     configure(cfg)
@@ -567,15 +786,21 @@ def main():
     if not files:
         print(f"Nothing waiting in {queue}")
         return
-    log(f"{len(files)} sheet(s) to {'dry-run' if args.dry_run else 'rip'} from {queue}")
+    log(f"{len(files)} file(s) to dry-run from {queue}{' as one batch' if args.batch else ''}")
 
-    for png in files:
-        try:
-            rip_one(main_win, pid, png, args.dry_run, queue / "ripped")
-        except Stop as e:
-            log(f"STOPPED on {png.name}: {e}")
-            log("That file is still in the queue folder. Nothing further was loaded.")
-            sys.exit(1)
+    try:
+        if args.batch:
+            pictures, planned = batch_pictures(files, cfg["gap_in"])
+            rip_pictures(main_win, pid, pictures, cfg, planned, dry_run=True,
+                         pause_at=pause_at, multi_add=args.try_multi_add)
+        else:
+            for png in files:
+                pictures, planned = batch_pictures([png], cfg["gap_in"])
+                rip_pictures(main_win, pid, pictures, cfg, planned, dry_run=True,
+                             pause_at=pause_at)
+    except Stop as e:
+        log(f"STOPPED: {e}")
+        sys.exit(1)
     log("All done.")
 
 
