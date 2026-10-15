@@ -170,7 +170,9 @@ def restart_and_wait(timeout=180, poll=2, sleep=None, clock=None, holder=None, s
     import time
     from .lock import lock_holder
     sleep, clock = sleep or time.sleep, clock or time.time
-    holder, starter = holder or lock_holder, starter or start
+    # Restart keeps the pause switch as it was (unlike the Start button, which
+    # means "go"): 2026-10-15 14:03 a restart test lifted Kevin's pause.
+    holder, starter = holder or lock_holder, starter or (lambda: start(resume_first=False))
     old = holder()
     request_restart()
     if old is None:
@@ -187,10 +189,11 @@ def restart_and_wait(timeout=180, poll=2, sleep=None, clock=None, holder=None, s
     return starter()
 
 
-def start():
-    """Turn the pause switch off and ask Task Scheduler to run the agent.
-    Returns (ok, message)."""
-    resume()
+def start(resume_first=True):
+    """Ask Task Scheduler to run the agent; by default also turn the pause
+    switch off (the Start button means "go"). Returns (ok, message)."""
+    if resume_first:
+        resume()
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     try:
         out = subprocess.run(["schtasks", "/run", "/tn", TASK_NAME], capture_output=True,

@@ -72,6 +72,24 @@ class Describe(unittest.TestCase):
             finally:
                 c.RESTART_PATH = saved
 
+    def test_restart_keeps_the_pause_switch(self):
+        import ripauto.control as c
+        import tempfile
+        from pathlib import Path
+        saved = (c.RESTART_PATH, c.PAUSE_PATH, c.subprocess.run)
+        with tempfile.TemporaryDirectory() as d:
+            c.RESTART_PATH, c.PAUSE_PATH = Path(d) / "RESTART", Path(d) / "PAUSE"
+            c.PAUSE_PATH.write_text("")
+            c.subprocess.run = lambda *a, **k: type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+            try:
+                ok, _ = c.restart_and_wait(holder=lambda: None)   # agent already stopped
+                self.assertTrue(ok)
+                self.assertTrue(c.PAUSE_PATH.exists())            # still paused
+                c.start()                                          # the Start button does resume
+                self.assertFalse(c.PAUSE_PATH.exists())
+            finally:
+                c.RESTART_PATH, c.PAUSE_PATH, c.subprocess.run = saved
+
     def test_dashboard_base(self):
         self.assertEqual(dashboard_base({"dashboard_url": "http://osshub.local:8085/api/heartbeat"}),
                          "http://osshub.local:8085")
