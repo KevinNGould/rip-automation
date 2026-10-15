@@ -2,9 +2,19 @@
 
 Claude Code rewrites this file at the end of every working session and pushes it. Chat reads this file first. Decisions and their reasoning live in `docs/DECISIONS.md` (newest first); the spec lives in `docs/SPEC.md`. Git history holds older versions of this file.
 
-**Last updated:** 2026-10-15 ~13:20 (printer PC clock) · **HEAD:** see `git log -1`
+**Last updated:** 2026-10-15 ~14:30 (printer PC clock) · **HEAD:** see `git log -1`
 
-## Latest (14:07): critique priority 1 is LIVE, plus closing each job tab right after its rip
+## Latest (14:30): the 14:07 run was cut short by a big picture still loading; fixed, not yet live
+
+- **14:07 Rip-now run (#47977 + #47979) was cancelled by the length gate:** the preview read 24.0 in, against 295.4 planned. #47979 is a 320 MB, 270 in PNG and was still loading when F3 and RIP were pressed. Nothing was ripped. Both sheets are **held**.
+- **Tab closing worked in real use.** Before New: "closed 2 job tab(s)" (Job26/27). After Cancel: "answered No to 'save changes?'" and "closed 1 job tab(s)".
+- **Fix built and tested (DECISIONS.md, top entry):**
+  - Each Add waits until PO-TRY has read the files and gone quiet (process counters).
+  - A short preview gets 2 retries (Cancel, wait, F3 + RIP again) before it's held.
+- **Not live yet.** It needs: Kevin's OK → re-queue #47977/#47979 → Restart agent. The live agent (pid 20384) runs the 14:06 code until then.
+- Next per the critique: A2 resume prompt, then B1 spacing probe (needs Kevin), B2 version check.
+
+## Earlier (14:07): critique priority 1 is LIVE, plus closing each job tab right after its rip
 
 - The agent (pid 20384, since 14:07:03) runs **A1** (proven live both ways), **A4** (× close proven on an empty tab, `x_button` at 12 px), and **B3**. It's unpaused and downloading #47977 and #47979.
 - **Restart agent** now relaunches through the RIP Agent window (tested: 16 s) and keeps the pause switch as it was. Kevin should close and reopen the window from the desktop shortcut to pick up that fix.

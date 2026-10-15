@@ -4,6 +4,21 @@ Newest first. Claude (chat) keeps this file; Claude Code adds entries when it de
 
 ## 2026-10-15
 
+**Built (Code, 14:30): wait for big pictures to finish loading; retry a short preview**
+- **What happened at 14:07.** Rip-now run of #47977 (24 in, 37 MB) and #47979 (270 in, 320 MB). Multi-add took both files. The W box showed a value right away, so the old `wait_loaded` went on; only #47977 was on the canvas when F3 and RIP were pressed. The preview read 24.02 in against 295.4 planned, so the gate cancelled the run. Nothing was ripped. Both sheets are held, and the run's tab was closed with "No" to save. Kevin saw the same thing from the floor.
+- **Fix 1: wait on PO-TRY's process, not its window (`ripauto/busy.py`).**
+  - After each Add, the agent waits until PO-TRY has read ~90% of the added files' bytes (`GetProcessIoCounters`), then until its CPU has been under 8% of a core for 4 s in a row (`GetProcessTimes`).
+  - Measured idle: 0–2%. It's read-only, and it works on the elevated PO-TRY even from a plain prompt.
+  - If the reads never arrive but nothing has happened for 15 s, it goes on and leaves the rest to the length gate.
+  - If the counters can't be read, it falls back to a fixed 20 s plus 1 s per 10 MB (52 s for #47979).
+  - The log line now ends with what was seen, e.g. "(320 of 320 MB read, quiet after 22 s)", so we learn the real load times.
+- **Fix 2: a short preview gets 2 retries before the hold.** Only when the gate says "may not have loaded":
+  - Cancel the preview, wait 30 s (then 60 s on the second retry) plus the quiet check, then F3, RIP and the OCR length check again.
+  - Other gate reasons (unreadable, over cap, loaded twice) cancel straight away as before.
+  - The hands-off guard stays armed throughout, so a person at the PC still aborts the run.
+- `--force` "takes the first run anyway" now logs once, not every 2 s countdown tick.
+- Tests: `tests/test_busy.py` (7). 210 pass.
+
 **Built (Code, after the critique): priority 1, i.e. A1, A4, B3 (not live until the agent restarts)**
 - **B3 (e2c21ea):** if PO-TRY's RIP queue *or* the Downloads folder can't be read, the pass is skipped and nothing is touched; sheets stay queued. While a warning is up, the popup says "Can't check PO-TRY's queue right now; trying again". After 3 misses in a row the dashboard shows error "can't read PO-TRY's RIP queue…", cleared when a read works.
 - **A1 (1c8e97d, `ripauto/handsoff.py`):** armed from New until Print. Before every press, keystroke and focus change, the driver checks for any of:
