@@ -1,26 +1,33 @@
 """
-agent.py  -  one cycle of plan -> hand check -> rip, keeping the ledger (SPEC §6, §7, §4).
-
-Step 4 provides a single cycle (--once). The loop, pause switch and Task
-Scheduler setup are step 6.
+agent.py  -  the agent: fetch -> plan -> hand check -> rip, keeping the ledger
+(SPEC §4, §6, §7, §9).
 
 One cycle:
   1. Sheets left in_run by an interrupted cycle are held for a person.
-  2. Hand-download check on every queued sheet (PO-TRY queue + Downloads).
-  3. Plan the queue; planner holds go into the ledger.
-  4. For each ready run (up to --max-runs): check its sheets by hand again,
-     then load, gate and rip it. Fully ripped files move to ripped\\{run-id}\\
-     and a run record goes to state/runs/{run-id}.json.
+  2. Plan the queue; planner holds go into the ledger. Nothing ready -> done,
+     without touching PO-TRY.
+  3. Only if a run is ready, nobody has used this PC for require_idle_s, and
+     PO-TRY isn't already ripping: hand-download check (PO-TRY queue +
+     Downloads), re-plan, then for each ready run (up to --max-runs) check its
+     sheets by hand again, load, gate and rip it. Fully ripped files move to
+     ripped\\{run-id}\\ and a run record goes to state/runs/{run-id}.json.
   Gate refusals and anything unexpected hold the run's sheets and end the
   cycle; nothing retries automatically.
 
+The loop (--loop, what Task Scheduler starts at logon): fetch every
+fetch_every_min, a cycle every LOOP_EVERY_S, a heartbeat to the Pi on every
+change. Pause switch: while state\\PAUSE exists it finishes what it's doing,
+then sits idle reporting "stopped" (tools\\pause.cmd / tools\\resume.cmd).
+Log: state\\agent.log, rotated daily.
+
 Run from an ADMINISTRATOR Command Prompt in the repo root:
   python -m ripauto.agent --plan                 show the plan; no PO-TRY, no changes
-  python -m ripauto.agent --once --dry-run       everything, Cancel at the preview,
+  python -m ripauto.agent --once --dry-run       one cycle, Cancel at the preview,
                                                  ledger left untouched
   python -m ripauto.agent --once --force --dry-run   same, using the first run even
                                                  if it isn't full or due yet
-  python -m ripauto.agent --once                 for real (Kevin's go-ahead first)
+  python -m ripauto.agent --once                 one real cycle
+  python -m ripauto.agent --loop                 run until stopped (Task Scheduler)
 """
 
 import argparse
@@ -28,17 +35,23 @@ import copy
 import json
 import shutil
 import sys
+import threading
+import time
 from datetime import datetime
 from pathlib import Path
 
 from . import ledger as L
-from .config import STATE_DIR, load_dashboard_key, load_machine, load_or_exit
+from .config import STATE_DIR, ConfigError, load_dashboard_key, load_machine, load_or_exit, load_secrets
 from .handcheck import BY_HAND, FREE, download_names, hand_check, queue_job_names
+from .lock import AgentLock, agent_running
 from .planner import Limits, plan
 from .potry import RIPPING_STATUSES, parse_size_cell
 from .status import NullReporter, Reporter
 
 RUNS_DIR = STATE_DIR / "runs"
+PAUSE_PATH = STATE_DIR / "PAUSE"
+LOOP_EVERY_S = 20
+ERROR_BACKOFF_S = 60
 
 
 class Stop(Exception):
@@ -302,8 +315,28 @@ def cycle(cfg, ledger, driver, now, *, dl_names_fn, runs_dir=RUNS_DIR, save=lamb
 
 # ---------------- PO-TRY side ----------------
 
+def seconds_since_input():
+    """Seconds since the last mouse or keyboard input on this PC (Windows), or
+    a large number where that can't be read."""
+    try:
+        import ctypes
+
+        class LASTINPUTINFO(ctypes.Structure):
+            _fields_ = [("cbSize", ctypes.c_uint), ("dwTime", ctypes.c_uint)]
+
+        info = LASTINPUTINFO()
+        info.cbSize = ctypes.sizeof(info)
+        if not ctypes.windll.user32.GetLastInputInfo(ctypes.byref(info)):
+            return 10 ** 6
+        return ((ctypes.windll.kernel32.GetTickCount() - info.dwTime) & 0xFFFFFFFF) / 1000.0
+    except Exception:
+        return 10 ** 6
+
+
 class PotryDriver:
-    """The real PO-TRY, through ripauto.potry. Needs an elevated prompt."""
+    """The real PO-TRY, through ripauto.potry. Needs an elevated prompt.
+    Connects on first use (so an idle loop never opens PO-TRY) and again
+    after reset(), e.g. when PO-TRY was restarted."""
 
     def __init__(self, cfg):
         from . import potry
@@ -313,14 +346,27 @@ class PotryDriver:
             sys.exit("pywinauto is missing. Run:  pip install pywinauto")
         if not potry.is_admin():
             sys.exit("Run this from an administrator Command Prompt. PO-TRY runs as admin.")
-        self.main, self.pid = potry.connect()
+        self.main = self.pid = None
+
+    def _ensure(self):
+        if self.main is None:
+            self.main, self.pid = self.potry.connect()
+            try:
+                self.main.maximize()             # SPEC §9: PO-TRY maximized
+            except Exception:
+                pass
+
+    def reset(self):
+        self.main = self.pid = None
 
     def queue_rows(self):
+        self._ensure()
         self.potry.show_queue(self.main)
         self.potry.time.sleep(self.potry.SETTLE)
         return self.potry.read_queue(self.main)
 
     def rip(self, pictures, planned_in, dry_run, on_progress=None):
+        self._ensure()
         try:
             return self.potry.rip_pictures(self.main, self.pid, pictures, self.cfg,
                                            planned_in, dry_run,
@@ -330,16 +376,106 @@ class PotryDriver:
             raise Stop(str(e)) from None
 
 
+# ---------------- the loop ----------------
+
+def make_fetcher(cfg, secrets, log):
+    """fetcher(ledger): download new sheets from the floor up. Raises on trouble."""
+    from . import fetch
+    floor = fetch.order_floor(0, cfg, downloading=True)
+
+    def fetcher(ledger):
+        token = fetch.get_token(cfg, secrets)
+        sheets = fetch.find_sheets(cfg, token, floor, note=lambda *_: None)
+        return fetch.download_new(cfg, ledger, sheets, log=log)
+    return fetcher
+
+
+def run_loop(cfg, ledger, driver, *, fetcher, dl_names_fn, reporter, save, log,
+             pause_path=PAUSE_PATH, idle_s=seconds_since_input, clock=time.time,
+             now_fn=datetime.now, sleep=time.sleep, stop=None, runs_dir=RUNS_DIR):
+    """Fetch every fetch_every_min, cycle every LOOP_EVERY_S, until stop is set.
+
+    Pause switch: while pause_path exists, nothing new starts; the loop reports
+    'stopped' and checks again every 10 s. A run already in progress finishes
+    first (pause is only checked between cycles and before a run starts).
+    Errors are logged and reported, PO-TRY is reconnected, and the loop waits
+    ERROR_BACKOFF_S before trying again; it never exits on its own."""
+    stop = stop or threading.Event()
+    fetch_every = max(1, cfg.get("fetch_every_min", 2)) * 60
+    need_idle = cfg.get("require_idle_s", 60)
+    last_fetch = None
+    paused = False
+    last_wait = None
+    log(f"Agent loop started (fetch every {fetch_every // 60} min, cycle every "
+        f"{LOOP_EVERY_S} s, needs {need_idle} s without mouse/keyboard before a run).")
+    reporter.update(state="idle")
+
+    def can_start():
+        return not pause_path.exists() and idle_s() >= need_idle
+
+    while not stop.is_set():
+        if pause_path.exists():
+            if not paused:
+                log(f"Paused ({pause_path.name} exists). Delete it or run tools\\resume.cmd to carry on.")
+                reporter.update(state="stopped", current_run=None)
+                paused = True
+            sleep(10)
+            continue
+        if paused:
+            log("Resumed.")
+            reporter.update(state="idle")
+            paused, last_fetch = False, None
+
+        try:
+            if last_fetch is None or clock() - last_fetch >= fetch_every:
+                reporter.update(state="fetching")
+                last_fetch = clock()
+                added = fetcher(ledger)
+                if added:
+                    log(f"Fetched {len(added)} new sheet(s).")
+            summary = cycle(cfg, ledger, driver, now_fn(), dl_names_fn=dl_names_fn,
+                            runs_dir=runs_dir, save=save, log=log, reporter=reporter,
+                            can_start=can_start, quiet=True)
+            if summary["waiting"] != last_wait and summary["waiting"] not in (None, "nothing queued"):
+                log(f"Waiting: {summary['waiting']}.")
+            last_wait = summary["waiting"]
+            if summary["stopped"]:
+                log(f"Run stopped: {summary['stopped']}. Those sheets are held; carrying on.")
+        except Exception as e:                     # never let one bad cycle end the agent
+            log(f"ERROR {type(e).__name__}: {e}")
+            reporter.update(state="error", current_run=None,
+                            last_error=f"{type(e).__name__}: {e}")
+            try:
+                driver.reset()
+            except Exception:
+                pass
+            sleep(ERROR_BACKOFF_S)
+            continue
+        sleep(LOOP_EVERY_S)
+    log("Agent loop stopped.")
+
+
+# ---------------- command line ----------------
+
+def make_reporter(cfg, ledger, log):
+    key = load_dashboard_key()
+    if cfg.get("dashboard_url") and key:
+        return Reporter(cfg, ledger, RUNS_DIR, cfg["dashboard_url"], key, log=log)
+    log("No dashboard_url / dashboard_key set; not sending heartbeats.")
+    return NullReporter()
+
+
 def main():
-    ap = argparse.ArgumentParser(description="One plan -> hand check -> rip cycle.")
+    ap = argparse.ArgumentParser(description="The RIP agent: fetch, plan, hand check, rip.")
+    ap.add_argument("--loop", action="store_true", help="run until stopped (Task Scheduler)")
     ap.add_argument("--once", action="store_true", help="run one cycle against PO-TRY")
     ap.add_argument("--plan", action="store_true", help="show the plan only; no PO-TRY, no changes")
-    ap.add_argument("--dry-run", action="store_true", help="Cancel at the preview; ledger untouched")
-    ap.add_argument("--force", action="store_true", help="use the first run even if not ready")
-    ap.add_argument("--max-runs", type=int, default=1, help="runs to rip this cycle (default 1)")
+    ap.add_argument("--dry-run", action="store_true", help="--once only: Cancel at the preview")
+    ap.add_argument("--force", action="store_true", help="--once only: first run even if not ready")
+    ap.add_argument("--max-runs", type=int, default=1, help="--once only: runs this cycle")
     args = ap.parse_args()
-    if args.once == args.plan:
-        sys.exit("Pick one: --plan or --once")
+    if [args.loop, args.once, args.plan].count(True) != 1:
+        sys.exit("Pick one: --loop, --once or --plan")
 
     cfg = load_or_exit(load_machine)
     ledger = L.load()
@@ -353,31 +489,58 @@ def main():
                   f"waited {r.oldest_wait_min:.0f} min  {' '.join(r.orders)}")
         for h in holds:
             print(f"  HOLD {h.sheet.order} sheet {h.sheet.position}: {h.reason}")
+        if agent_running():
+            print("(The agent loop is running.)")
         return
 
     from .potry import log
-    driver = PotryDriver(cfg)
     hand_dir = Path(cfg["hand_download_dir"]) if cfg.get("hand_download_dir") else None
     if hand_dir is None:
         sys.exit("Set hand_download_dir in machine.json (SPEC §4).")
-    key = load_dashboard_key()
-    if cfg.get("dashboard_url") and key:
-        reporter = Reporter(cfg, ledger, RUNS_DIR, cfg["dashboard_url"], key, log=log)
-    else:
-        log("No dashboard_url / dashboard_key set; not sending heartbeats.")
-        reporter = NullReporter()
+    dl_names = lambda: download_names(hand_dir)
+
+    if args.once:
+        if agent_running():
+            sys.exit("The agent loop is running. Pause it (tools\\pause.cmd) and wait for "
+                     "'stopped' on the dashboard, or end the scheduled task, first.")
+        driver = PotryDriver(cfg)
+        reporter = make_reporter(cfg, ledger, log)
+        reporter.start()
+        try:
+            summary = cycle(cfg, ledger, driver, now, dl_names_fn=dl_names,
+                            save=lambda: L.save(ledger), dry_run=args.dry_run, force=args.force,
+                            max_runs=args.max_runs, log=log, reporter=reporter)
+        finally:
+            reporter.stop("stopped")
+        log(f"Cycle done: ripped {len(summary['ripped'])}, dry runs {len(summary['dry_runs'])}, "
+            f"held total {len(summary['held'])}, by hand total {len(summary['by_hand'])}"
+            + (f", waiting: {summary['waiting']}" if summary["waiting"] else "")
+            + (f", stopped: {summary['stopped']}" if summary["stopped"] else ""))
+        if summary["stopped"]:
+            sys.exit(1)
+        return
+
+    # --loop
+    try:
+        fetcher = make_fetcher(cfg, load_or_exit(load_secrets), log)
+    except ConfigError as e:
+        sys.exit(f"Not starting the loop: {e}.")
+    lock = AgentLock()
+    try:
+        lock.__enter__()
+    except RuntimeError as e:
+        sys.exit(f"Not starting: {e}.")
+    driver = PotryDriver(cfg)
+    reporter = make_reporter(cfg, ledger, log)
     reporter.start()
     try:
-        summary = cycle(cfg, ledger, driver, now, dl_names_fn=lambda: download_names(hand_dir),
-                        save=lambda: L.save(ledger), dry_run=args.dry_run, force=args.force,
-                        max_runs=args.max_runs, log=log, reporter=reporter)
+        run_loop(cfg, ledger, driver, fetcher=fetcher, dl_names_fn=dl_names,
+                 reporter=reporter, save=lambda: L.save(ledger), log=log)
+    except KeyboardInterrupt:
+        log("Stopped with Ctrl+C.")
     finally:
-        reporter.stop("stopped")             # --once ends here; the loop (step 6) won't
-    log(f"Cycle done: ripped {len(summary['ripped'])}, dry runs {len(summary['dry_runs'])}, "
-        f"held total {len(summary['held'])}, by hand total {len(summary['by_hand'])}"
-        + (f", stopped: {summary['stopped']}" if summary["stopped"] else ""))
-    if summary["stopped"]:
-        sys.exit(1)
+        reporter.stop("stopped")
+        lock.__exit__(None, None, None)
 
 
 if __name__ == "__main__":

@@ -35,6 +35,7 @@ MACHINE_DEFAULTS = {
     "max_width_in": None,      # printable width; None = not checked
     "start_from_order": None,  # go-live floor (SPEC §4); fetch --download refuses without it
     "multi_add": True,         # one Add dialog for many files; proven 2026-10-15
+    "require_idle_s": 60,      # no mouse/keyboard for this long before the loop starts a run
 }
 
 

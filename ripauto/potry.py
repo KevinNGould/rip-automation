@@ -49,7 +49,7 @@ from .config import STATE_DIR, load_machine, load_or_exit
 from .planner import planned_length
 from .sheets import png_size_in
 
-LOG_PATH = STATE_DIR / "rip_log.txt"
+LOG_PATH = STATE_DIR / "agent.log"         # earlier logs stay in state/rip_log.txt
 EXE_NAME = "MtFlatbedPrinterApp.exe"
 EXE_PATH = None             # set from machine.json by configure()
 PRN_DIR = None
@@ -72,10 +72,43 @@ def configure(cfg):
     PRN_DIR = Path(cfg["potry_prnlist"])
 
 
+LOG_KEEP_DAYS = 30
+
+
+def rotate_log(path, now=None):
+    """If path was last written on an earlier day, rename it agent-YYYY-MM-DD.log
+    (that day) and drop dated logs older than LOG_KEEP_DAYS."""
+    now = now or datetime.now()
+    try:
+        written = datetime.fromtimestamp(path.stat().st_mtime)
+    except OSError:
+        return
+    if written.date() >= now.date():
+        return
+    dated = path.with_name(f"{path.stem}-{written:%Y-%m-%d}{path.suffix}")
+    try:
+        path.replace(dated)
+    except OSError:
+        return
+    for old in path.parent.glob(f"{path.stem}-????-??-??{path.suffix}"):
+        try:
+            day = datetime.strptime(old.stem[len(path.stem) + 1:], "%Y-%m-%d")
+        except ValueError:
+            continue
+        if (now - day).days > LOG_KEEP_DAYS:
+            try:
+                old.unlink()
+            except OSError:
+                pass
+
+
 def log(msg):
+    """Print and append to state/agent.log (rotated daily, SPEC §9). Never
+    pass secrets here; file names and order numbers are fine (local only)."""
     line = f"{datetime.now():%Y-%m-%d %H:%M:%S}  {msg}"
     print(line)
     LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    rotate_log(LOG_PATH)
     with open(LOG_PATH, "a", encoding="utf-8") as f:
         f.write(line + "\n")
 
@@ -739,7 +772,8 @@ def rip_pictures(main, pid, pictures, cfg, planned_in, dry_run,
         result["job_name"] = actual_name        # what PO-TRY actually called it
     result["ended"] = datetime.now().isoformat(timespec="seconds")
     log(f"  rip done; queue size {result['row'].get('Size (inch)', '?')}")
-    show_layout(main)
+    # Left on the RIP queue view: that's where people print the job from.
+    # The next run switches back to the layout view itself.
     return result
 
 
