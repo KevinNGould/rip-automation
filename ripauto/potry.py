@@ -886,18 +886,20 @@ def press_open(dlg, box):
         keys(box, "{ENTER}", "opening the file")
 
 
-def add_picture(main, pid, path):
+def add_picture(main, pid, path, meter=None):
     dlg = open_add_dialog(main, pid)
-    press_open(dlg, fill_name_box(dlg, str(path)))
+    box = fill_name_box(dlg, str(path))
+    start_read = meter()[1] if meter else None
+    press_open(dlg, box)
     wait_for(lambda: not visible(dlg), 30, "the file dialog to close")
-    wait_loaded(main)
+    wait_loaded(main, meter, start_read, file_bytes([path]))
 
 
 class MultiAddRefused(Stop):
     """The Add dialog wouldn't take several names; nothing was added."""
 
 
-def add_pictures_together(main, pid, paths):
+def add_pictures_together(main, pid, paths, meter=None):
     """Several files in one Add, the way a person would multi-select (SPEC §7
     step 2). Proven on Kevin's 3-sheet dry run, 2026-10-15 11:17."""
     folder = paths[0].parent
@@ -907,7 +909,9 @@ def add_pictures_together(main, pid, paths):
     box = fill_name_box(dlg, str(folder))
     keys(box, "{ENTER}", "opening the folder")    # go to the folder first
     time.sleep(SETTLE)
-    press_open(dlg, fill_name_box(dlg, " ".join(f'"{p.name}"' for p in paths)))
+    box = fill_name_box(dlg, " ".join(f'"{p.name}"' for p in paths))
+    start_read = meter()[1] if meter else None
+    press_open(dlg, box)
     try:
         wait_for(lambda: not visible(dlg), 30, "the file dialog to close")
     except Stop:
@@ -916,19 +920,53 @@ def add_pictures_together(main, pid, paths):
         except Exception:
             pass
         raise MultiAddRefused("the Add dialog didn't take several files at once")
-    wait_loaded(main)
+    wait_loaded(main, meter, start_read, file_bytes(paths))
 
 
-def wait_loaded(main):
+def file_bytes(paths):
+    total = 0
+    for p in paths:
+        try:
+            total += Path(p).stat().st_size
+        except OSError:
+            pass
+    return total
+
+
+def fallback_load_s(nbytes):
+    """Fixed wait when PO-TRY's process counters can't be read: 20 s plus
+    1 s per 10 MB, so a 320 MB sheet gets ~52 s."""
+    return 20 + nbytes / 10e6
+
+
+def wait_loaded(main, meter=None, start_read=None, nbytes=0):
+    """Wait for the pictures just added to be on the canvas. The W box only
+    shows that *something* is selected; for a big file it fills in long
+    before the picture is there (2026-10-15 14:07), so also wait for PO-TRY
+    to have read the files and gone quiet (busy.py)."""
+    from .busy import wait_until_loaded
     vals = layout_values(main)
-    if num(vals.get("W")) is None:
-        log("  can't read the W box; giving the picture a fixed 20 s to load")
-        time.sleep(20)
-        return
-    vals = wait_for(lambda: (v := layout_values(main)) and (num(v.get("W")) or 0) > 0 and v,
-                    LOAD_TIMEOUT, "the picture to load (W stayed at 0)", interval=1)
+    if num(vals.get("W")) is not None:
+        vals = wait_for(lambda: (v := layout_values(main)) and (num(v.get("W")) or 0) > 0 and v,
+                        LOAD_TIMEOUT, "the picture to load (W stayed at 0)", interval=1)
+    done, note = (wait_until_loaded(meter, nbytes, LOAD_TIMEOUT, start_read=start_read)
+                  if meter else (False, "no process meter"))
+    if not done:
+        wait_s = fallback_load_s(nbytes)
+        log(f"  {note}; giving the pictures a fixed {wait_s:.0f} s to load")
+        time.sleep(wait_s)
+        note = f"waited {wait_s:.0f} s"
     time.sleep(SETTLE)
-    log(f"  loaded   {fmt(vals)}")
+    log(f"  loaded   {fmt(layout_values(main))}   ({note})")
+
+
+def short_of_planned(gate):
+    """The gate's 'a picture may not have loaded' reason: worth waiting and
+    laying out again before giving up."""
+    return bool(gate) and "may not have loaded" in gate
+
+
+LOAD_RETRIES = 2              # Cancel, wait, F3 and RIP again when the preview is short
 
 
 def intelligent_layout(main):
@@ -1008,12 +1046,14 @@ def rip_pictures(main, pid, pictures, cfg, planned_in, dry_run,
         tab = new_job(main)
         remember_tab(pid, tab)
         log(f"  new job ({tab or 'tab name unclear'})")
+        from .busy import ProcessMeter
+        meter = ProcessMeter(pid)
         pictures_to_add = list(pictures)
         if multi_add:
             distinct = list(dict.fromkeys(pictures))
             for chunk in multi_add_chunks(distinct):
                 try:
-                    add_pictures_together(main, pid, chunk)
+                    add_pictures_together(main, pid, chunk, meter)
                 except MultiAddRefused as e:
                     log(f"  multi-add refused ({e}); adding the rest one at a time")
                     break
@@ -1021,25 +1061,37 @@ def rip_pictures(main, pid, pictures, cfg, planned_in, dry_run,
                     pictures_to_add.remove(p)
                 log(f"  multi-add took {len(chunk)} file(s) in one go")
         for i, p in enumerate(pictures_to_add, 1):
-            add_picture(main, pid, p)
+            add_picture(main, pid, p, meter)
             log(f"  added {i}/{len(pictures_to_add)}  {p.name}")
         if "loaded" in pause_at:
             pause("all pictures loaded, before F3")
-        intelligent_layout(main)
 
-        # Mark the time before RIP is pressed, so the queue row's timestamp is
-        # never earlier than this whichever moment PO-TRY stamps it.
-        started_ts = time.time() - 5
-        started_str = datetime.fromtimestamp(started_ts).strftime("%Y-%m-%d %H:%M:%S")
-        press(tool_button(main, "RIP"), opens_dialog=True)
-        preview = wait_for(lambda: find_preview(main, pid), PREVIEW_TIMEOUT, "the Print preview dialog")
-        print_btn, cancel_btn = preview_buttons(preview)
-        if not (print_btn and cancel_btn):
-            raise Stop("the preview's Print/Cancel buttons couldn't be confirmed")
+        for attempt in range(LOAD_RETRIES + 1):
+            intelligent_layout(main)
+            # Mark the time before RIP is pressed, so the queue row's timestamp is
+            # never earlier than this whichever moment PO-TRY stamps it.
+            started_ts = time.time() - 5
+            started_str = datetime.fromtimestamp(started_ts).strftime("%Y-%m-%d %H:%M:%S")
+            press(tool_button(main, "RIP"), opens_dialog=True)
+            preview = wait_for(lambda: find_preview(main, pid), PREVIEW_TIMEOUT, "the Print preview dialog")
+            print_btn, cancel_btn = preview_buttons(preview)
+            if not (print_btn and cancel_btn):
+                raise Stop("the preview's Print/Cancel buttons couldn't be confirmed")
 
-        size = read_preview(preview, job, cfg.get("max_width_in"))
-        gate = gate_reason(size, cfg["cap_in"], planned_in, len(pictures), cfg.get("gap_in", 0))
-        log(f"  preview size: {size}   planned {planned_in:.1f} in   gate: {gate or 'ok'}")
+            size = read_preview(preview, job, cfg.get("max_width_in"))
+            gate = gate_reason(size, cfg["cap_in"], planned_in, len(pictures), cfg.get("gap_in", 0))
+            log(f"  preview size: {size}   planned {planned_in:.1f} in   gate: {gate or 'ok'}")
+            if not short_of_planned(gate) or attempt == LOAD_RETRIES:
+                break
+            # Short: most likely a big picture still loading (2026-10-15 14:07).
+            # Cancel, let PO-TRY finish, lay out again and look again.
+            press(cancel_btn, opens_dialog=True)
+            wait_for(lambda: not find_preview(main, pid), 30, "the preview to close")
+            wait_s = 30 * (attempt + 1)
+            log(f"  short of planned; pressed Cancel, waiting {wait_s} s more for "
+                f"pictures to load, then F3 and RIP again ({attempt + 1}/{LOAD_RETRIES})")
+            time.sleep(wait_s)
+            wait_loaded(main, meter, None, 0)
         if "preview" in pause_at:
             pause("the Print preview")
         result = {"job_name": job, "preview": size, "gate": gate, "row": None,

@@ -192,10 +192,11 @@ def plan_and_hold(ledger, now, limits, save, log, quiet=False):
     return runs
 
 
-def pick(runs, force, log):
+def pick(runs, force, log, quiet=False):
     chosen = [r for r in runs if r.ready]
     if not chosen and force and runs:
-        log("Nothing ready; --force takes the first run anyway.")
+        if not quiet:
+            log("Nothing ready; --force takes the first run anyway.")
         return runs[:1]
     return chosen
 
@@ -238,7 +239,7 @@ def cycle(cfg, ledger, driver, now, *, dl_names_fn, runs_dir=RUNS_DIR, save=lamb
 
     if not L.queued_sheets(ledger):
         return done("nothing queued")
-    chosen = pick(plan_and_hold(ledger, now, limits, save, log, quiet), force, log)
+    chosen = pick(plan_and_hold(ledger, now, limits, save, log, quiet), force, log, quiet)
     if not chosen:
         return done("no run ready yet")
     if not can_start(chosen[0]):
