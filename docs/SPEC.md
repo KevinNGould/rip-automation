@@ -30,6 +30,7 @@ All machines run the same PO-TRY software, so one codebase serves all of them. E
 
 Rules:
 - A line item belongs to exactly one machine. If a title matches no enabled machine, it's ignored. If it matches two, that's a config error: refuse to start.
+- The table above lives in a committed `config/machines.json` (product rules only, no secrets). Every agent loads it at startup to run the overlap check, then uses the entry named by its own `machine.json` → `machine_id`.
 - **Image by Size** items carry a different attribute (`_Print Ready`, a signed `…/shopify/gang/print-ready?...` URL, plus `Uploaded File`) instead of `_Print Ready File`. Build the code path behind a feature flag, but don't enable it until a test order is verified the way #47918 was.
 
 ---
@@ -48,6 +49,7 @@ rip-automation/
     status.py                  heartbeat sender
     agent.py                   the loop
   tools/probe_potry.py         read-only UI dump (diagnostics)
+  config/machines.json         committed: every machine's product rules (§2)
   config/machine.example.json  committed
   config/secrets.example.json  committed, empty values
   dashboard/                   Pi side (read-only status page)
