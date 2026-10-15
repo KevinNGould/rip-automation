@@ -18,6 +18,11 @@ Newest first. Claude (chat) keeps this file; Claude Code adds entries when it de
 **Proven in the trial**
 - #47918 fetched and ripped hands-free, about 30 s from New to "RIP finished". See `trial/`.
 
+**Decided (Kevin, ~11:55): go-live floor**
+- Kevin has no undownloaded 8-color orders; the last one in, **#47942**, he already grabbed by hand. So **`start_from_order` = 47943**, set in `machine.json` on the 8-color PC. List-only fetch from #47943 shows 0 sheets, so nothing is waiting.
+- Hand check verified on real hand downloads: #47932, #47935, #47940 and #47942 all come back **by_hand** against Kevin's Downloads folder (read-only check). #47932 and #47935 were "free" at the 11:xx check, before Kevin downloaded them.
+- The first real multi-sheet rip has to wait for new 8-color orders at #47943 or above. For that first test, **nobody hand-downloads them**. If someone does, the hand check skips them (safe), but there's then nothing to test on.
+
 **Verified live (Kevin, 11:16–11:17) and decided (Code)**
 - **OCR gate works inside PO-TRY.** Both 3-sheet dry runs logged `preview size: (22.5, 65.237)   planned 65.2 in   gate: ok`, then Cancel.
 - **Multi-file Add works.** With all three files in one Add, the preview read the same 65.237 in, so all three loaded. The agent now uses it by default (`multi_add`, chunks of 10 files per dialog). If the dialog ever refuses, the rest go in one at a time in the same job.
