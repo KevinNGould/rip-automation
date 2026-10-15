@@ -126,6 +126,21 @@ Newest first. Claude (chat) keeps this file; Claude Code adds entries when it de
   - **C. Trust the planner with margin.** Calibrate `gap_in` from real runs, and plan to a lower ceiling (e.g. 640) so real length stays under 650. Use B as the backstop.
 
   Code recommends **A if the text is there, plus B always** (B also gives the numbers to calibrate `gap_in`). If the preview has no size text, then **C + B**.
+- (Code) **UV sheets would route to the CMYK line (found ~12:00, read-only check of 45 unfulfilled orders from #47900).** The shop's four DTF products are:
+  - `DTF (4 Color CMYK) - Gang Sheet Builder - INSTA Peel Film` (28 items)
+  - `DTF (4 Color CMYK) - Image by Size - INSTA Peel Film` (8 items)
+  - `DTF Color-Pro (8 Color CMYK+RGBO) - Gang Sheet Builder - INSTA Peel Film` (9 items)
+  - `UV DTF (4 Color CMYK) - Gang Sheet Builder - UV Transfer Stickers` (2 items)
+
+  Matching is "title contains", and the UV title *contains* the CMYK rule's text, so UV sheets land on the `cmyk` line. **No effect today:** only `8color-1` is enabled; the 8-color sheets (all 9) routed correctly, and 4-color, UV and blanks/HTV are all skipped. But it must be fixed before CMYK or UV is switched on. Also, adding a UV rule as things stand would trip the overlap check and stop every fetch.
+
+  **Proposed fix (spec change, chat to decide):** match on **title starts with** instead of contains. Rules would be:
+  - 8color: `DTF Color-Pro (8 Color CMYK+RGBO)`
+  - cmyk: `DTF (4 Color CMYK) - Gang Sheet Builder`, `DTF (4 Color CMYK) - Image by Size`
+  - uv: `UV DTF (4 Color CMYK) - Gang Sheet Builder`
+
+  None of these is a prefix of another, so the "matches two lines → refuse" rule keeps working.
+- Q5 (partly answered by the data): the UV DTF product title is `UV DTF (4 Color CMYK) - Gang Sheet Builder - UV Transfer Stickers`. Kevin to confirm it's the only UV product, and whether UV #1 and #2 can both print it.
 - (Code) **Job tabs pile up** (one New per run, SPEC §7). Closing the run's tab isn't built yet; it needs a probe of the tab's close control.
 - ~~(Code) Multi-file Add~~ confirmed 11:17 by the OCR length; now the default.
 - (Code) **SPEC wording to tidy:** §3's config-split bullet still lists "label, product rules" under `machine.json`, and §4 says "Product rules come from `machine.json`". Both contradict §2 (rules live in `machines.json`). Code follows §2.

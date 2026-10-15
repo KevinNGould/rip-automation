@@ -78,6 +78,8 @@ Earlier today: the 10:41 incident (backlog downloaded by mistake) is resolved. T
 
 ## Needs a decision / tidy (DECISIONS.md → Open)
 
+- **Chat (before CMYK/UV go live):** UV sheets currently route to the CMYK line, because "title contains" overlaps. Proposed: match on "title starts with". This doesn't affect the 8-color: Kevin asked about 4-color sheets being skipped, and the check showed 8-color routing is right and 4-color is skipped on purpose (CMYK is off).
+
 - **Chat:** SPEC §3/§4 wording still puts product rules in `machine.json`. §3's layout should also list `ledger.py` and `handcheck.py`.
 - **Chat/Kevin:** confirm the Q1 reading (copies split only when they can't all fit under the cap).
 - **Chat:** SPEC §7 step 6 should say "read off the preview by OCR" instead of "via UIA" (DECISIONS.md, 11:3x).
