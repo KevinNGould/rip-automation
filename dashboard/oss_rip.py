@@ -621,7 +621,7 @@ function historyChart(hist) {
   const days = hist.length;
   return `<div class="chart" id="chart"><svg viewBox="0 0 ${W} ${H}" role="img"
       aria-label="Inches ripped by the agent per day, last ${days} days">${g}</svg><div class="tip" id="tip"></div></div>
-    <div class="sumrow"><span><b>${n(tot.inches, 0)}</b> in ripped</span><span><b>${n(tot.runs)}</b> runs</span>
+    <div class="sumrow"><span><b>${n(tot.inches, 0)}</b> in ripped</span><span><b>${n(tot.runs)}</b> run${tot.runs == 1 ? "" : "s"}</span>
       <span><b>${tot.runs ? n(tot.inches / tot.runs, 0) : "–"}</b> in per run</span>
       <span><b>${n(tot.sheets)}</b> sheets by the agent</span><span><b>${n(tot.hand)}</b> found done by hand</span></div>
     <details><summary>Show as a table</summary><table><tr><th>Day</th><th class="num">Inches</th><th class="num">Runs</th>
@@ -726,7 +726,7 @@ function eventLine(e) {
   const on = `<b>${esc(e.label)}</b>`, inch = e.inches ? ` · ${n(e.inches, 1)} in` : "";
   switch (e.kind) {
     case "waiting": return [e.first_seen, `Waiting on ${on} (sheet ${esc(e.ref)}, ${esc(e.detail)}${inch}). Last seen waiting ${dt(e.last_seen)}.`];
-    case "ripped": return [e.at || e.first_seen, `<span class="tag ok">ripped</span> on ${on} in run ${esc(e.ref)}${inch} run, ${esc(e.detail)}.`];
+    case "ripped": return [e.at || e.first_seen, `<span class="tag ok">ripped</span> on ${on} in run ${esc(e.ref)} (${e.inches ? n(e.inches, 1) + " in, " : ""}${esc(e.detail.replace(" in run", ""))}).`];
     case "gate": return [e.at || e.first_seen, `<span class="tag warn">cancelled at preview</span> on ${on}, run ${esc(e.ref)}. Held for a person.`];
     case "stopped": return [e.at || e.first_seen, `<span class="tag bad">run stopped</span> on ${on}, run ${esc(e.ref)}. Held for a person.`];
     case "over_cap": return [e.at || e.first_seen, `<span class="tag bad">over cap</span> on ${on}, run ${esc(e.ref)}. Delete from the RIP queue by hand.`];
