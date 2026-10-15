@@ -13,7 +13,7 @@ PINK = (230, 0, 230)
 DARK = (45, 45, 45)
 
 
-def fake_preview(width_text, length_text, sheet_h=430, sheet_w=150):
+def fake_preview(width_text, length_text, sheet_h=430, sheet_w=150, width_line_from=None):
     """A stand-in for PO-TRY's preview: dark area, white sheet, pink dimension
     lines with ticks touching the labels, width label above the sheet and the
     length label turned sideways on the left line, breaking it in two."""
@@ -23,7 +23,8 @@ def fake_preview(width_text, length_text, sheet_h=430, sheet_w=150):
     top, left = 30, 110
     d.rectangle((left, top, left + sheet_w, top + sheet_h), fill=(250, 250, 250))
     # width line, ticks right against the text
-    d.line((left, 18, left + sheet_w, 18), fill=PINK, width=1)
+    d.line((width_line_from if width_line_from is not None else left, 18, left + sheet_w, 18),
+           fill=PINK, width=1)
     d.line((left, 8, left, top), fill=PINK)
     d.line((left + sheet_w, 8, left + sheet_w, top), fill=PINK)
     d.rectangle((left + 25, 9, left + sheet_w - 25, 27), fill=DARK)
@@ -71,6 +72,12 @@ class Geometry(unittest.TestCase):
     def test_finds_length_line_and_sheet_top(self):
         self.assertEqual(length_line(fake_preview("22.500 inch", "135.400 inch")), (80, 30))
 
+    def test_width_line_crossing_the_length_line_is_not_the_sheet_top(self):
+        # 2026-10-15 13:00: on a narrow run the width line poked out left across
+        # the length line's column, and the width label got cut in half.
+        img = fake_preview("22.500 inch", "195.037 inch", width_line_from=60)
+        self.assertEqual(length_line(img), (80, 30))
+
     def test_no_pink_no_line(self):
         self.assertIsNone(length_line(Image.new("RGB", (100, 100), DARK)))
 
@@ -87,6 +94,10 @@ class WindowsOcr(unittest.TestCase):
         size, seen = self.read(fake_preview("22.500 inch", "601.001 inch"))
         self.assertEqual(seen["how"], "label strips")
         self.assertEqual(size, (22.5, 601.001), seen)
+
+    def test_reads_a_narrow_run_with_crossing_width_line(self):
+        size, seen = self.read(fake_preview("22.500 inch", "195.037 inch", width_line_from=60))
+        self.assertEqual(size, (22.5, 195.037), seen)
 
     def test_reads_a_short_run(self):
         size, seen = self.read(fake_preview("22.500 inch", "135.400 inch", sheet_h=200))

@@ -31,6 +31,7 @@ OCR_SCRIPT = REPO / "tools" / "ocr_image.ps1"
 SCALE = 3            # small UI text reads far better upscaled
 OCR_TIMEOUT = 60
 STRIP = 14           # half-height of a label strip, in captured pixels
+MIN_SEGMENT = 8      # pink pixels in a row that count as the length line itself
 BACKGROUND = (45, 45, 45)
 
 _INCH = re.compile(r"(\d+(?:[.,]\d+)?)\s*inch", re.I)
@@ -88,8 +89,19 @@ def length_line(image):
     x = max(range(len(cols)), key=cols.__getitem__)
     if cols[x] < 40:
         return None
-    top = next(y for y in range(h) if is_pink(px[x, y]))
-    return x, top
+    # The sheet's top is where the line's first real segment starts. Skip short
+    # crossings: on a narrow run the width line pokes out left across this
+    # column (2026-10-15 13:00 run: it cut the width label in half).
+    y = 0
+    while y < h:
+        if is_pink(px[x, y]):
+            start = y
+            while y < h and is_pink(px[x, y]):
+                y += 1
+            if y - start >= MIN_SEGMENT:
+                return x, start
+        y += 1
+    return None
 
 
 def clean(image):
