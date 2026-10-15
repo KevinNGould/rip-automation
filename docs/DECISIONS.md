@@ -18,6 +18,14 @@ Newest first. Claude (chat) keeps this file; Claude Code adds entries when it de
 **Proven in the trial**
 - #47918 fetched and ripped hands-free, about 30 s from New to "RIP finished". See `trial/`.
 
+**First unattended run (12:59–13:00): hand check right, OCR cancelled, fixed**
+- The run was due 12:56:26 and waited for 60 s without input (old rule), because Kevin was at the PC. It started 12:59:57.
+- **Hand check, on real hand work:** #47951 was found in Kevin's Downloads and #47952 in PO-TRY's RIP queue (ripped by hand). Both were marked by_hand and skipped.
+- **Run:** #47957 + #47960 + #47964, planned 197.0 in, loaded by multi-add, F3, preview. OCR read the length as **195.037** but **no width**: on this narrow run the pink width line pokes out across the length line's column, the sheet top was found too high, and the width label was cut in half. The gate said "unreadable" → **Cancel**; nothing ripped, and the 3 sheets are held. The safety net worked.
+- **Fix (1075eb1):** the sheet top is now the start of the length line's first 8+ px segment. All four captured previews read correctly, including this one (22.5 × 195.037).
+- **F3 spacing varies:** 1.02 in per gap on the 3-sheet test, 1.0 on the 11:36 run, **0.02** here (195.037 against 195.0 of artwork). **Fix (646f1c9):** the shortfall check now allows gaps anywhere from 0 to `gap_in`, so long runs with tight spacing aren't wrongly cancelled. The cap and over-length checks still use the full planned length. **Open:** with many pictures, a missing small sheet is now harder to spot by length alone. Run records keep the measured gaps; revisit once there's data from full runs.
+- **Next:** restart the agent onto the new code (OCR fix, gap rule, corner warning, Rip now, Restart button) and re-queue #47957/#47960/#47964. They get the hand check again before ripping. Waiting on Kevin's OK.
+
 **Decided (Kevin + Code, ~12:40): corner rip warning, Rip now, Restart agent (built, not live until one restart)**
 - **Kevin:** "a windows status widget … in one of the four corners … for 60 seconds … a warning that an auto rip is imminent." Kevin also asked about a force-rip button.
 - **Built (`ripauto/warning.py`, `tools/rip_warning.pyw`):** when a run is ready, the agent shows an always-on-top popup in a screen corner (`warning_corner`, default bottom-right, above the taskbar).
