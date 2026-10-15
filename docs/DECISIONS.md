@@ -18,6 +18,29 @@ Newest first. Claude (chat) keeps this file; Claude Code adds entries when it de
 **Proven in the trial**
 - #47918 fetched and ripped hands-free, about 30 s from New to "RIP finished". See `trial/`.
 
+**Decided (Code, step 5 build): heartbeat + Pi dashboard**
+- **Hub pattern followed** (from `oss_command.py`):
+  - new independent service `oss_rip` (`dashboard/oss_rip.py`) on **osshub.local:8085**, its own systemd unit
+  - settings `~/oss_rip_settings.json` (chmod 600) with a generated agent key; agents send it as `X-Agent-Key`
+  - request bodies capped at 64 KB; JSON via `get_json(silent)`
+  - no existing hub service was touched; ports 8080–8084 belong to the others
+- **Display-only, no PIN.** The page and `/api/machines` are open on the LAN, since they hold only order numbers, inches and states. There are no routes that can start anything (a test checks the route list). Other hub pages are PIN-gated; **chat/Kevin:** say if this one should be too.
+- **Machine cards come from `machines.json`.** Deploy copies `config/machines.json` to `~/oss_rip_machines.json`. Renaming, adding or switching off a printer is a config change: edit, re-copy, `systemctl restart oss_rip`.
+- **Offline** = no heartbeat for 120 s, judged by the Pi's own clock, not `sent_at`. The last heartbeat per machine survives restarts (`~/oss_rip_state.json`, chmod 600).
+- **Private data:**
+  - The agent builds heartbeats only from counts, order numbers and states.
+  - Hold reasons and errors go through `scrub()`: paths, links, emails, app file and job names (which carry customer names), tokens, 10+ digit IDs.
+  - The Pi re-cleans everything again: known machine ids only, whitelisted fields, order-number pattern, same scrub.
+  - The SPEC §8 leak test (`tests/test_status.py`) feeds customer names, emails, an address, file URLs, Windows paths, Shopify IDs and a token through a ledger and run records, and asserts none reach the JSON. A Pi-side test does the same for incoming heartbeats.
+- **`dashboard_key` lives in `config/secrets.json`** next to the Shopify credential, and is sent only to the Pi. SPEC §3 says secrets.json is "Shopify credential only"; **chat:** please widen that to "credentials", or say where the key should live instead.
+- **What the agent reports:**
+  - Heartbeats go out on every state change: planning → ripping (with progress from PO-TRY's queue Processing %) → idle, or holding (gate cancelled) / error (stopped).
+  - They also go out every 30 s from a background thread, and as a final `stopped` when `agent --once` exits.
+  - An unreachable Pi is logged once and never stops a rip.
+  - `today.sheets` counts pictures (physical sheets, copies included) from today's real ripped runs; `today.inches_ripped` uses the queue's actual length.
+- **The 20 accidental-download holds were moved to `by_hand`** (Kevin: already downloaded and printed by hand), so the dashboard flags only what needs a person.
+- **Live check:** a heartbeat from the 8-color PC shows on `http://osshub.local:8085` as Printer #3 (8-color), stopped, 135.4 in today (1 run, 2 sheets), 0 waiting; the other 4 printers show "switched off". The ripping view (run orders + progress bar) appears on the next real run.
+
 **Incident (Code, step 5): Shopify token printed into the Code transcript**
 - GitHub's secret scanning blocked a push because the leak test held a made-up `shpat_…` literal. The fake token is now built at runtime, and that push went through.
 - While checking the repo for other token-shaped strings, Code ran a plain `grep -r` over the working folder. It matched the git-ignored `config/secrets.json` and **printed the real (borrowed, shared) Shopify token into the Code session transcript**.

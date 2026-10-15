@@ -25,3 +25,17 @@ python -m unittest                               run the tests
 ```
 
 Runtime files (ledger `state/processed.json`, run records `state/runs/`, `state/rip_log.txt`) live in `state/`, which is git-ignored.
+
+## Pi dashboard (`dashboard/`)
+
+`oss_rip.py` runs on the hub Pi as the `oss_rip` service at http://osshub.local:8085. It's display-only; agents post heartbeats to `/api/heartbeat` with the key from `~/oss_rip_settings.json` (stored on each printer PC as `dashboard_key` in `config/secrets.json`).
+
+Deploy or update from the repo root on a printer PC:
+
+```
+scp -i ~/.ssh/osshub_key dashboard/oss_rip.py dashboard/oss_rip.service pi@osshub.local:~/
+scp -i ~/.ssh/osshub_key config/machines.json pi@osshub.local:~/oss_rip_machines.json
+ssh -i ~/.ssh/osshub_key pi@osshub.local "sed -i 's/\r$//' ~/oss_rip.py ~/oss_rip.service ~/oss_rip_machines.json && sudo cp ~/oss_rip.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now oss_rip && sudo systemctl restart oss_rip"
+```
+
+Dashboard tests need Flask, so they run on the Pi: copy `dashboard/`, `tests/` and `config/machines.json` into a temp folder there and run `python3 -m unittest tests.test_dashboard`.

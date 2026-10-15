@@ -2,9 +2,7 @@
 
 Claude Code rewrites this file at the end of every working session and pushes it. Chat reads this file first. Decisions and open questions live in `docs/DECISIONS.md`; the spec lives in `docs/SPEC.md`. Git history holds older versions of this file.
 
-**Last updated:** 2026-10-15, after the 11:36 first real rip · **SPEC §12 step 4 done; Code stops before step 5 and checks in** · **HEAD:** see `git log -1`
-
-(Times are from the 8-color PC's logs. Earlier versions of this file and DECISIONS.md carried some guessed "~12:xx" times; those are corrected.)
+**Last updated:** 2026-10-15 ~11:56 (printer PC clock) · **SPEC §12 step 5 done; Code stops before step 6 and checks in** · **HEAD:** see `git log -1`
 
 ---
 
@@ -13,71 +11,49 @@ Claude Code rewrites this file at the end of every working session and pushes it
 | SPEC §12 step | State |
 |---|---|
 | 1–3 | **Done** |
-| 4. Driver multi-file runs + length gate + hand-download check + `start_from_order` | **Done.** First real agent rip at 11:36 (below). |
-| 5. Heartbeat + Pi dashboard | Not started. **Waiting for Kevin/chat to say go.** |
-| 6–8 | Not started |
+| 4. Driver, length gate, hand check, floor | **Done.** First real agent rip 11:36 (#47946 + #47947, 135.4 in). |
+| 5. Heartbeat + Pi dashboard + leak test | **Done.** Live at **http://osshub.local:8085**. |
+| 6. Agent loop, pause switch, Task Scheduler | Not started. **Waiting for Kevin/chat to say go.** |
+| 7–8 | Not started |
 
-Tests: `python -m unittest` from the repo root runs 131 tests, all passing.
+Tests: `python -m unittest` from the repo root runs 149 on the printer PC (all pass; 7 dashboard tests skip without Flask). Those 7 pass on the hub Pi.
 
-## First real run (11:36)
+## Step 5: what was built
 
-`python -m ripauto.agent --once --force` (Kevin, admin prompt), run `8color-1-20261015-113554`:
+- **`ripauto/status.py`:** builds the SPEC §8 heartbeat from the ledger and run records. Free text (hold reasons, errors) is scrubbed of paths, links, emails, app file/job names, tokens and IDs. A `Reporter` sends on every state change plus every 30 s, and never stops a rip if the Pi is down.
+- **`ripauto/agent.py`:** reports `planning → ripping` (orders, planned inches, progress % from PO-TRY's queue) `→ idle`. A cancelled gate is `holding`, a stopped run is `error`, and the exit is `stopped`.
+- **`dashboard/oss_rip.py`:** the hub's new `oss_rip` service on :8085 (systemd, same pattern as `oss_command`):
+  - `POST /api/heartbeat` with `X-Agent-Key`; incoming data re-cleaned on the Pi
+  - `GET /api/machines`, and the page at `/`
+  - one card per machine from `machines.json`: running/stopped/offline (2 min), current run + progress, inches today, queue, held sheets, last error
+  - display-only, no PIN
+- **Leak test** (`tests/test_status.py`) per SPEC §8, plus a Pi-side test that incoming heartbeats are cleaned.
+- **Config:** `dashboard_url` in `machine.json` = `http://osshub.local:8085/api/heartbeat`. `dashboard_key` in `secrets.json` was copied from the hub without being printed.
 
-| | |
-|---|---|
-| Sheets | #47946 (22×120, 121.2 in measured) + #47947 (22×12, 13.2 in, low-res) |
-| Load | one multi-file Add, then F3 |
-| Planned | 135.4 in (2 pictures, 1.0 in gap) |
-| Preview (OCR) | 22.5 × 135.4, gate ok |
-| Rip | Print in the preview → Ripping 41…87 → RIP finished 100, about 35 s |
-| Queue size | 22.500×135.400; measured gap 1.0 in = `gap_in` |
-| After | both `ripped` in the ledger; files in `ripped\8color-1-20261015-113554\`; run record in `state/runs/` |
+## Verified
 
-Nothing was printed: Kevin prints from PO-TRY's RIP queue as usual.
-
-## How we got here today (short)
-
-- **10:18:** Kevin verified the port (`--inspect-queue`, one-sheet dry run).
-- **10:41:** incident: backlog downloaded by mistake, contained. Already printed by hand, so no harm (DECISIONS.md).
-- **11:05:** probe dry run. The preview's size isn't readable by UI automation, and the canvas doesn't list its pictures.
-- **~11:1x:** Kevin's screenshot showed the size drawn on the preview, so the length gate became **OCR of the preview** (Windows' built-in OCR), with a post-rip queue-size backstop. `gap_in` was set to 1.0.
-- **11:16–11:17:**
-  - 3-sheet dry runs: OCR 22.5 × 65.237, gate ok.
-  - Multi-file Add proven.
-  - F3 confirmed.
-- **Before 11:29:**
-  - Floor `start_from_order` = **47943** (Kevin had handled everything through #47942).
-  - Hand check verified on Kevin's real hand downloads (#47932/#47935/#47940/#47942 → by_hand).
-  - #47946 and #47947 arrived and were downloaded on Kevin's go-ahead.
-- **11:29:** first agent dry run. OCR misread (`*2.500`, `135400`) and the gate cancelled correctly. OCR made sturdier: label strips only, pink painted out, the lost decimal restored, a width check.
-- **11:34:** agent dry run passed. **11:36:** first real rip passed.
-
-## What exists (ripauto/)
-
-- `config.py`: `machines.json` (committed: lines, product rules, machines, enabled) + `machine.json` (local: id, folders, limits, `start_from_order` 47943, `gap_in` 1.0, `multi_add` on) + `secrets.json`.
-- `fetch.py`: Shopify → queue folder. `--download` refuses without a floor; new sheets enter the ledger as `queued`.
-- `sheets.py`: app file naming, position, PNG size from DPI.
-- `planner.py`: batching (SPEC §6, with Kevin's Q1 rule).
-- `ledger.py`: `queued → in_run → ripped | held | by_hand`, plus `copies_ripped`.
-- `handcheck.py`: SPEC §4 check against PO-TRY's queue and Downloads.
-- `potry.py`: the driver. Multi-file runs, OCR length gate (±max(3 in, 1%) of planned, never over the cap), queue statuses, run matching by any picture name.
-- `ocr.py` + `tools/ocr_image.ps1`: reads the preview's width/length labels.
-- `agent.py`: one cycle (`--once`, `--dry-run`, `--force`, `--plan`). The loop is step 6.
+- On the hub: `oss_rip` active and enabled; settings and state files chmod 600; the other five services (`oss_command`, `oss_hub`, `oss_printer`, `oss_tracker`, `oss_uptime`) still active.
+- A heartbeat from the 8-color PC shows Printer #3 (8-color): stopped, 135.4 in today, 1 run / 2 sheets, 0 waiting. The four other printers show "switched off".
+- Not yet seen live: the ripping view (orders + progress bar). It appears on the next real `agent --once` run.
 
 ## Needs a decision / tidy (DECISIONS.md → Open)
 
-- **Kevin/chat: go for step 5** (heartbeat + Pi dashboard)?
-- **Chat (before CMYK/UV go live):** UV sheets currently route to the CMYK line ("title contains" overlaps). Proposed: match on "title starts with".
-- **Chat:** spec wording to tidy:
+- **Kevin/chat: go for step 6** (agent loop, pause switch, Task Scheduler)?
+- **Kevin: Shopify token exposure.** It was printed into the Code transcript during step 5 (not committed). Rotate now, or wait for the dedicated app (step 7)? Rotating the shared token affects the hub, scanners, printer and tracker.
+- **Chat:** the dashboard has no PIN (display-only, no private data). OK, or gate it like the other hub pages?
+- **Chat:** `dashboard_key` sits in `secrets.json`; SPEC §3 says "Shopify credential only".
+- **Chat (before CMYK/UV go live):** UV sheets route to the CMYK line; proposed fix is "title starts with".
+- **Chat:** spec wording:
   - §3/§4 still put product rules in `machine.json`.
-  - §3's layout should list `ledger.py`, `handcheck.py` and `ocr.py`.
-  - §7 step 6 should say "read off the preview by OCR", not "via UIA".
+  - §3's layout should list `ledger.py`, `handcheck.py`, `ocr.py` and `status.py`.
+  - §7 step 6 should say "OCR", not "UIA".
 - **Chat/Kevin:** confirm the Q1 reading (copies split only when they can't all fit under the cap).
-- **Open (Code):** closing PO-TRY job tabs after a run (a dozen have piled up from today's tests).
-- Still open: Q4 (flush minutes), Q5 (UV/CMYK details), Q6 (PC host names), the dedicated Shopify app.
+- **Open (Code):** closing PO-TRY job tabs after a run.
+- Still open: Q4 (flush minutes), Q5 (UV/CMYK details), Q6 (PC host names).
 
 ## Housekeeping
 
-- `C:\Users\kevin\Downloads\8color-hold-accidental-20261015` holds the 21 files from the incident. Their ledger entries are `held`. Clear the folder whenever you like.
-- `C:\Users\kevin\Downloads\8color-dryrun` holds copies of three already-printed sheets for dry runs.
+- Deploying dashboard changes: copy `dashboard/oss_rip.py` (and `config/machines.json` as `~/oss_rip_machines.json`) to `pi@osshub.local`, strip CRs, then `sudo systemctl restart oss_rip`. The README has the commands.
+- `C:\Users\kevin\Downloads\8color-hold-accidental-20261015`: the 21 files from the 10:41 incident; ledger entries are now `by_hand`. Clear the folder whenever you like.
+- `C:\Users\kevin\Downloads\8color-dryrun`: copies of three already-printed sheets for dry runs.
 - `config/secrets.json` still has default file permissions; locking it is Kevin's call.
