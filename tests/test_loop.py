@@ -121,6 +121,23 @@ class Loop(unittest.TestCase):
         self.assertFalse(self.pending.exists())                    # loop stopped: popup closed
         self.assertEqual(L.status(self.ledger["a"]), L.QUEUED)
 
+    def test_busy_po_try_keeps_the_popup_and_skips_a_new_countdown(self):
+        self.add("a", 47950, 600.0)
+        d = FakeDriver(rows=[{"Job name": "47000-x-(1)", "Status": "Ripping", "Processing": "40"}])
+        msgs, deadlines = [], set()
+
+        def watch(ft):
+            if self.pending.exists():
+                p = json.loads(self.pending.read_text())
+                msgs.append(p["message"])
+                deadlines.add(p["deadline"])
+            if ft.sleeps == 40:                              # the hand job finishes
+                d.rows = [{"Job name": "47000-x-(1)", "Status": "RIP finished", "Processing": "100"}]
+        self.loop(d, max_sleeps=44, on_sleep=watch)
+        self.assertIn("Waiting for PO-TRY to finish ripping another job", msgs)
+        self.assertEqual(len(d.calls), 1)                    # ripped once PO-TRY was free...
+        self.assertEqual(len(deadlines), 1)                  # ...with no second 60 s countdown
+
     def test_wait_5_min(self):
         self.add("a", 47950, 600.0)
         d = FakeDriver()

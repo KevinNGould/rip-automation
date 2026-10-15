@@ -90,6 +90,7 @@ class Gate:
         self.deadline = None
         self.go = False
         self.snoozed_until = 0.0
+        self.last_info = None
 
     @property
     def active(self):
@@ -98,7 +99,21 @@ class Gate:
     def reset(self):
         if self.deadline is not None:
             self.warner.close()
-        self.deadline, self.go = None, False
+        self.deadline, self.go, self.last_info = None, False, None
+
+    def hold(self, message):
+        """The run was cleared to start but can't yet (PO-TRY is busy ripping
+        another job). Keep the popup up saying why; the countdown is over, so
+        the next check starts the run as soon as it can, with no new countdown."""
+        if self.deadline is None or self.last_info is None:
+            return
+        self.deadline = min(self.deadline, self.clock())
+        self.last_info = dict(self.last_info, deadline=self.deadline, message=message)
+        self.warner.show(self.last_info)
+
+    def started(self):
+        """Called right before the agent takes the mouse: close the popup."""
+        self.reset()
 
     def __call__(self, run):
         now = self.clock()
@@ -127,14 +142,19 @@ class Gate:
             self.log(f"Rip warning shown: {run.planned_in:.0f} in, {run.pictures} sheet(s), "
                      f"{' '.join(run.orders)}; starts in {self.deadline - now:.0f} s.")
         message = None
+        cleared = False
         if now >= self.deadline:
             if self.go or self.idle_s() >= self.still_s:
-                self.reset()
-                return True
-            message = "Starting as soon as the mouse and keyboard are still"
-        self.warner.show({
+                cleared = True
+                message = "Starting now. Hands off the mouse."
+            else:
+                message = "Starting as soon as the mouse and keyboard are still"
+        # The popup stays up until the agent actually takes over (started()),
+        # so a busy PO-TRY can be explained in it rather than restarting the count.
+        self.last_info = {
             "deadline": self.deadline, "message": message, "corner": self.corner,
             "planned_in": run.planned_in, "pictures": run.pictures, "orders": run.orders[:12],
             "more_orders": max(0, len(run.orders) - 12), "rip_now": bool(rip_now or self.go),
-        })
-        return False
+        }
+        self.warner.show(self.last_info)
+        return cleared

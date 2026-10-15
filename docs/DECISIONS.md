@@ -26,6 +26,11 @@ Newest first. Claude (chat) keeps this file; Claude Code adds entries when it de
   - It's a no-activate tool window and hands focus back to whatever had it, so typing elsewhere isn't interrupted. Tested: Chrome kept the foreground while it was up.
   - At zero it starts once mouse and keyboard have been still for **5 s** (`still_before_rip_s`), so it never grabs the mouse mid-movement. The popup closes just before the agent takes over.
   - **This replaces "60 s with no input before a run"** (`require_idle_s` is gone). A person at the PC now gets 60 s notice and a choice, instead of the run silently waiting until they walk away.
+- **When the box appears** (Kevin asked):
+  - It appears the moment a run becomes ready: full (≥ 552 in planned, which can happen right after a big order downloads) or due (its oldest sheet has waited 30 min).
+  - It doesn't appear while paused, during a "Wait 5 min" snooze, or with nothing waiting.
+  - It stays up until the agent actually takes the mouse.
+  - If PO-TRY is busy ripping another job when the countdown ends, the box stays up saying "Waiting for PO-TRY to finish ripping another job", and the run starts as soon as PO-TRY is free, with **no second countdown**. Code fixed this while answering; it used to restart the 60 s every pass. A pending Rip now also survives a busy PO-TRY.
 - **Rip now** (RIP Agent window, or the popup's button): drops `state\RIP_NOW`. The agent rips the next planned run even if it isn't full or due, after a 10 s popup countdown. Every safety stays: hand check, preview length gate, PO-TRY-busy check, pause.
 - **Restart agent** (RIP Agent window): drops `state\RESTART`. The loop exits at a safe point (between cycles, never mid-run or mid-countdown) with code 3, and Task Scheduler's restart-on-failure starts it again about a minute later with any new code. No admin needed.
 - **Not live yet:** the agent running since 12:26 loaded the old code. The switch needs one restart: this first time by Task Scheduler (End + Run) or an admin prompt, since the old code doesn't know the RESTART flag. After that, Restart agent works from the window.

@@ -55,6 +55,7 @@ LOOP_EVERY_S = 20
 COUNTDOWN_TICK_S = 2          # while the rip warning is up, check more often
 ERROR_BACKOFF_S = 60
 COUNTDOWN = "rip warning countdown"
+BUSY = "PO-TRY is busy ripping"
 RESTART_PATH = STATE_DIR / "RESTART"     # RIP Agent window "Restart agent" (picks up new code)
 RESTART_EXIT_CODE = 3
 
@@ -195,7 +196,7 @@ def pick(runs, force, log):
 
 def cycle(cfg, ledger, driver, now, *, dl_names_fn, runs_dir=RUNS_DIR, save=lambda: None,
           dry_run=False, force=False, max_runs=1, log=print, reporter=None,
-          can_start=lambda run: True, quiet=False):
+          can_start=lambda run: True, on_start=lambda: None, quiet=False):
     """One pass. driver needs .queue_rows() and .rip(pictures, planned_in, dry_run,
     on_progress). reporter (status.Reporter) gets every state change for the
     Pi dashboard. On a dry run the caller's ledger is left untouched.
@@ -241,7 +242,7 @@ def cycle(cfg, ledger, driver, now, *, dl_names_fn, runs_dir=RUNS_DIR, save=lamb
     rows = driver.queue_rows()
     if ripping_now(rows):
         log("PO-TRY is still ripping a job; waiting.")
-        return done("PO-TRY is busy ripping")
+        return done(BUSY)
     own = own_job_names(runs_dir)
     queued = [s.key for s in L.queued_sheets(ledger)]
     if apply_hand_check(ledger, queued, queue_job_names(rows, own), dl_names_fn(), now, log):
@@ -270,6 +271,7 @@ def cycle(cfg, ledger, driver, now, *, dl_names_fn, runs_dir=RUNS_DIR, save=lamb
             "planned_in": run.planned_in, "progress_pct": 0})
         progress = lambda pct: reporter.update(progress_pct=pct)
         if dry_run:
+            on_start()
             result = driver.rip(pictures, run.planned_in, dry_run=True, on_progress=progress)
             write_record(runs_dir, record_for(run_id + "-dry", cfg, run, pictures, result,
                                               "dry_run", True))
@@ -280,6 +282,7 @@ def cycle(cfg, ledger, driver, now, *, dl_names_fn, runs_dir=RUNS_DIR, save=lamb
         L.start_run(ledger, run_id, run.items, now)
         save()
         try:
+            on_start()                      # close the corner warning before taking the mouse
             result = driver.rip(pictures, run.planned_in, dry_run=False, on_progress=progress)
         except Exception as e:               # Stop from the driver, or anything else
             L.hold(ledger, keys, f"manual check: run {run_id} stopped: {e}", now)
@@ -460,10 +463,12 @@ def run_loop(cfg, ledger, driver, *, fetcher, dl_names_fn, reporter, save, log,
             rip_now = rip_now_path.exists()
             summary = cycle(cfg, ledger, driver, now_fn(), dl_names_fn=dl_names_fn,
                             runs_dir=runs_dir, save=save, log=log, reporter=reporter,
-                            can_start=gate, force=rip_now, quiet=True)
-            if summary["waiting"] != COUNTDOWN:
+                            can_start=gate, on_start=gate.started, force=rip_now, quiet=True)
+            if summary["waiting"] == BUSY:
+                gate.hold("Waiting for PO-TRY to finish ripping another job")
+            elif summary["waiting"] != COUNTDOWN:
                 gate.reset()                       # run went, or isn't ready any more
-            if rip_now and summary["waiting"] != COUNTDOWN:
+            if rip_now and summary["waiting"] not in (COUNTDOWN, BUSY):
                 if summary["waiting"] in ("nothing queued", "no run ready yet"):
                     log("Rip now: nothing is waiting to rip.")
                 try:
