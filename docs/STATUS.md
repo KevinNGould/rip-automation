@@ -10,9 +10,7 @@ Claude Code rewrites this file at the end of every working session and pushes it
 
 At 10:41–10:43 Code accidentally ran `fetch --download` with no floor and downloaded 20 backlog sheets (#43227 … #47874), plus part of #47887, before killing it. **Nothing was ripped and PO-TRY wasn't touched.** All 21 files are now in `C:\Users\kevin\Downloads\8color-hold-accidental-20261015`, and their ledger entries are `held`. Full list and cause: DECISIONS.md → "Incident".
 
-**This affects the go-live floor.** Those downloads probably flipped the app's counter to **1/1** on orders that may never have been printed. So "oldest order still at 1/0" no longer works as the floor test for orders up to #47887. Kevin needs to judge those orders by whether they were actually printed.
-
-Step 4 is paused until Kevin has seen this. Uncommitted work in progress: `ripauto/ledger.py` (ledger states). The `start_from_order` guard in `fetch.py` is not in yet.
+**Resolved with Kevin:** the range (#43227 from Aug 27 through #47874 from last night) was already downloaded and printed by hand, so the counters were already 1/1 and the floor reading is unaffected. Files stay held. Step 4 resumed.
 
 ---
 
