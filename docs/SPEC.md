@@ -20,17 +20,20 @@ Ripping is fully automatic. People print from PO-TRY's RIP queue as they do toda
 
 ## 2. Machines and routing
 
-All machines run the same PO-TRY software, so one codebase serves all of them. Each PC has a `machine.json` that says which machine it is.
+All machines run the same PO-TRY software, so one codebase serves all of them. Products route to a **line** (a kind of printing); a line can have more than one **machine**, each with its own PC. Each PC has a `machine.json` that says which machine it is.
 
-| machine_id | Machine | Products it takes (title contains) | Length cap | v1 |
-|---|---|---|---|---|
-| `8color` | 8-color CMYK+RGBO DTF | `DTF Color-Pro (8 Color CMYK+RGBO)` | 650 in | **enabled** |
-| `cmyk` | 5-head CMYK DTF | `DTF (4 Color CMYK) - Gang Sheet Builder`, `DTF (4 Color CMYK) - Image by Size` | TBD | off |
-| `uvdtf` | 3-head UV DTF | TBD (Kevin to supply product titles) | TBD | off |
+| line | machine_id | Machine | Products the line takes (title contains) | Length cap | v1 |
+|---|---|---|---|---|---|
+| `8color` | `8color-1` | Printer #3, 8-color CMYK+RGBO DTF | `DTF Color-Pro (8 Color CMYK+RGBO)` | 650 in | **enabled** |
+| `cmyk` | `cmyk-1` | Printer #1, CMYK DTF | `DTF (4 Color CMYK) - Gang Sheet Builder`, `DTF (4 Color CMYK) - Image by Size` | TBD | off |
+| `cmyk` | `cmyk-2` | Printer #2, CMYK DTF | (same line as cmyk-1) | TBD | off |
+| `uv` | `uv-1` | UV Printer #1 (old) | TBD (Kevin to supply product titles) | TBD | off |
+| `uv` | `uv-2` | UV Printer #2 (new) | (same line as uv-1, unless the two differ in what they can print) | TBD | off |
 
 Rules:
-- A line item belongs to exactly one machine. If a title matches no enabled machine, it's ignored. If it matches two, that's a config error: refuse to start.
-- The table above lives in a committed `config/machines.json` (product rules only, no secrets). Every agent loads it at startup to run the overlap check, then uses the entry named by its own `machine.json` → `machine_id`.
+- A line item belongs to exactly one **line**. If a title matches no enabled line, it's ignored. If it matches two lines, that's a config error: refuse to start.
+- The table above lives in a committed `config/machines.json` (lines, their product rules, and the machines in each, with labels; no secrets). Every agent loads it at startup to run the overlap check, then uses the entry named by its own `machine.json` → `machine_id`. The dashboard reads machine labels from the same file, so renaming or adding a printer is a config change, not a code change.
+- **v1: one enabled machine per line.** When a line has two machines enabled (two CMYK, two UV), work has to be divided between them. That's the future **dispatcher** (§13), not something each agent does on its own; until it exists, refuse to start if two machines of one line are enabled.
 - **Image by Size** items carry a different attribute (`_Print Ready`, a signed `…/shopify/gang/print-ready?...` URL, plus `Uploaded File`) instead of `_Print Ready File`. Build the code path behind a feature flag, but don't enable it until a test order is verified the way #47918 was.
 
 ---
@@ -80,7 +83,19 @@ Changes:
 - Customer name needs `read_customers` + protected customer data "Name". The trial token lacks it, so names are blank. See §10.
 - Record in the ledger, per sheet: order#, line ID, position, qty, measured length (§5), low-res flag, file path, fetched_at.
 
-Known risk: if someone downloads an 8-color order by hand *and* the agent fetches it, it gets ripped twice. The agent can't read the app's 1/0 counter. Rule for the shop: once the 8-color agent is live, nobody hand-downloads 8-color orders.
+**Hand-download check (Kevin, 2026-10-15).** People keep working by hand alongside the agent, and Shopify has no record of the app's 1/0 → 1/1 counter (checked #47930 vs #47932: no tag, metafield, attribute or event differs). The counter lives only on the app's servers. So before a sheet is planned into a run, the agent checks two local places on its own PC:
+- **PO-TRY's RIP queue:** a row whose job name starts with the same `{order#}-` and carries the same position.
+- **The person's Downloads folder** (`hand_download_dir` in `machine.json`; 8-color: `C:\Users\kevin\Downloads`, top level only, not `8color-queue`): an app-named file with the same order# and position. Hand-downloads for 8-color always happen on the 8-color PC.
+
+Outcomes:
+- Match on order# **and** position → skip as **taken by hand**: ledger state `by_hand`, never ripped, shown on the dashboard.
+- Neither place has the order# → the agent may take it.
+- **Can't tell** → don't rip; hold as **manual check** with the reason. Covers: a file or row with the right order# whose position can't be read or doesn't match; the queue table unreadable; the Downloads folder unreadable.
+- Re-run the check immediately before each run starts, not only at fetch time; a person may have grabbed it in between.
+
+**Go-live floor.** One-time: Kevin finds the oldest 8-color order still showing **1/0** in the app's Unfulfilled tab; that number goes into `machine.json` as `start_from_order`. Everything below it is ignored for good. The checks above handle overlap from then on.
+
+Possible upgrade: if Build a Gang Sheet can tag an order in Shopify when it's downloaded (an app setting, or ask their support), read that tag as a third check.
 
 ---
 
@@ -200,8 +215,17 @@ Create a dedicated Shopify Dev Dashboard app for this system (scopes: `read_orde
 1. Repo skeleton, config split, `.gitignore`; port the two scripts into `ripauto/` unchanged except config loading. Re-run the #47918-style test.
 2. Naming fix (§4) + sheet length from PNG (§5) + tests.
 3. Planner (§6) as a pure function + tests (include: exactly 650, 651, qty pushing over, flush timing, order kept together).
-4. Driver: multi-file runs + preview length gate (§7). Dry-run a 2–3 sheet batch, then a real one.
+4. Driver: multi-file runs + preview length gate (§7). Hand-download check + `start_from_order` (§4), with tests for each outcome (by hand / free / manual check). Dry-run a 2–3 sheet batch, then a real one.
 5. Heartbeat + Pi dashboard (§8) + leak test.
 6. Agent loop, pause switch, Task Scheduler setup (§9).
 7. Dedicated Shopify app swap (§10).
 8. Later: CMYK and UV machines.
+
+---
+
+## 13. Future: whole-shop dispatch (not v1)
+
+Kevin's direction for when every printer is on the system: a **shared network dispatch folder**. Sheets are fetched once and placed into per-machine folders on the share. Each printer PC's agent rips only from its own folder. That's where load is split between the two CMYK printers and the two UV printers. Design v1 so this is a small step:
+- Keep fetch, planning and ripping separable: an agent should be able to run "rip from this folder" without fetching.
+- Paths come from config, never hard-coded.
+- The dashboard is driven by `config/machines.json`, so machines can be added, renamed or switched on and off without code changes.
