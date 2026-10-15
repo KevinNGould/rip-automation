@@ -18,6 +18,14 @@ Newest first. Claude (chat) keeps this file; Claude Code adds entries when it de
 **Proven in the trial**
 - #47918 fetched and ripped hands-free, about 30 s from New to "RIP finished". See `trial/`.
 
+**Found (Code, from Kevin's 11:05 dry runs and probes)**
+- The 3-sheet batch dry run worked end to end: New → 3 Adds → F3 → RIP → preview → Cancel. Log: `state/rip_log.txt` on the 8-color PC.
+- **The Print preview exposes no size text to automation.** Its readable controls are all settings: driver, copies, error compensation, print-area margins, mirror/rotate, information output. The picture is drawn in a `QGraphicsView` that automation can't see into. So SPEC §7 step 6's "find it via UIA" can't be done, and the gate correctly reported "preview length unreadable" and cancelled both times. **As built, no real rip can happen: every run would be cancelled at the gate.** That's the safe state until the question under Open is decided.
+- **Pictures can't be counted through automation either.** The layout canvas (`LayoutDesignGraphicsView`) doesn't expose its pictures; only the X/Y/W/H boxes of the selected one are readable.
+- **Multi-file Add:** with `--try-multi-add`, the dialog closed after taking all three names, and the W/H boxes then showed the last file (22.1 × 10.257 in, #47918). That's consistent with all three loading, and the load took 9 s against ~19 s one at a time. It can't be confirmed by counting (see above), so Kevin is asked whether he saw three pictures.
+- **Gap is probably about 1 in, not 0.5.** After F3, #47918 sat at Y = 46.78 in, right after the 45.74 in #47862 sheet. That's one data point. At 18 pictures, a 0.5 in estimate would under-plan by about 9 in. `gap_in` should be calibrated from real runs using the queue's `Size (inch)`.
+- **Job tabs:** 12 are open now (Job1–Job12, mostly from dry runs). Tab items expose no close control, so closing tabs needs another route (to be probed).
+
 **Decided (Code, step 4 build)**
 - **Real rips only through the ledger.** `python -m ripauto.potry` now only inspects and dry-runs (`--dry-run` is required). Real rips go through `python -m ripauto.agent --once`, which keeps the ledger, the hand check and the run records. The old "rip everything in the queue folder" path is gone, because it bypassed all three.
 - New modules not in SPEC §3's layout: `ripauto/ledger.py` (sheet states) and `ripauto/handcheck.py` (SPEC §4 check). `agent.py` has one cycle (`--once`) and `--plan`; the loop is step 6.
@@ -93,8 +101,14 @@ Newest first. Claude (chat) keeps this file; Claude Code adds entries when it de
 - Replace the borrowed Pi paperwork-printer token with a dedicated Shopify app (read_orders, read_customers, Name access).
 - ~~(Code) "Matches two machines → refuse" can't be fully checked~~ settled: `config/machines.json`, built (see Code entry above).
 - ~~(Code) Printable width for 8-color?~~ settled: 23 in.
+- (Code) **DECISION NEEDED: how to check run length before confirming the rip** (SPEC §7 step 6 can't be done through automation; see "Found" above). Options:
+  - **A. Windows OCR on the preview.** Take a screenshot of the preview's picture area and read it with Windows' built-in OCR. The en-US engine is present on the 8-color PC and Pillow is installed. This only works **if the preview actually draws "22.500 inch × 601.001 inch" somewhere**, which is unconfirmed. Code can check without risk: Kevin pauses a dry run at the preview, Code takes a screenshot and OCRs it (read-only), Kevin presses Enter, and the run Cancels.
+  - **B. Rip, then check.** After Print, the queue row's `Size (inch)` (e.g. `22.500×601.001`) is readable. If it's over the cap, the agent holds the run and flags "delete this job from the RIP queue by hand"; it never touches the queue toolbar. Weaker: an over-cap job sits ripped in the queue until someone deletes it.
+  - **C. Trust the planner with margin.** Calibrate `gap_in` from real runs, and plan to a lower ceiling (e.g. 640) so real length stays under 650. Use B as the backstop.
+
+  Code recommends **A if the text is there, plus B always** (B also gives the numbers to calibrate `gap_in`). If the preview has no size text, then **C + B**.
 - (Code) **Job tabs pile up** (one New per run, SPEC §7). Closing the run's tab isn't built yet; it needs a probe of the tab's close control.
-- (Code) **Multi-file Add:** `--try-multi-add` exists for the dry run; whether PO-TRY's dialog takes several files is still unknown.
+- (Code) **Multi-file Add:** the dialog accepted three names in one go (see "Found"). Kevin: did three pictures show on the canvas in that run? If yes, the agent switches to one Add per run, plus single Adds for extra copies.
 - (Code) **SPEC wording to tidy:** §3's config-split bullet still lists "label, product rules" under `machine.json`, and §4 says "Product rules come from `machine.json`". Both contradict §2 (rules live in `machines.json`). Code follows §2.
 - ~~(Code) Backlog cutoff~~ settled 10:31, see above. Was: **Backlog cutoff before go-live (step 6).** The live list shows 26 unhandled 8-color sheets on unfulfilled orders, going back to #43227. Most were presumably printed by hand already. Before the agent runs unattended, we need either `fetch --mark-done` (optionally with `--from`) or a `start_from_order` setting. Also #47914 was hand-downloaded during the verification, but the agent's ledger still shows it as new.
 

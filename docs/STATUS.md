@@ -2,7 +2,16 @@
 
 Claude Code rewrites this file at the end of every working session and pushes it. Chat reads this file first. Decisions and open questions live in `docs/DECISIONS.md`; the spec lives in `docs/SPEC.md`. Git history holds older versions of this file.
 
-**Last updated:** 2026-10-15 afternoon, step 4 code done; waiting on Kevin's admin-prompt dry runs · **HEAD:** see `git log -1`
+**Last updated:** 2026-10-15 ~11:15, Kevin's dry runs done; **length-gate method needs a decision** · **HEAD:** see `git log -1`
+
+## Latest (11:15): read this first
+
+- Kevin's two dry runs worked: three sheets loaded as one job → F3 → RIP → preview → **Cancel**. Multi-file Add accepted all three names in one go.
+- **Blocker:** the Print preview exposes no size text to automation, so the length gate can't read the run length and cancels every run. That's safe, but it means **no real rip can happen yet**. Options A/B/C are in DECISIONS.md → Open, "DECISION NEEDED". Code recommends **A** (OCR the preview) **if the preview draws the size as text, plus B** (check the queue row's size after the rip) as a backstop.
+- **Questions for Kevin:**
+  1. In the multi-add run, did all **three** pictures show on the canvas?
+  2. Does the Print preview **show the job size** (like "22.500 inch × 601.001 inch") anywhere? If unsure, Code can check by screenshot + OCR while Kevin holds a dry run paused at the preview. That check is read-only.
+- Also seen: probably about 1 in of gap per picture (not 0.5), and 12 job tabs piling up in PO-TRY. See "Found" in DECISIONS.md.
 
 ---
 
@@ -11,7 +20,7 @@ Claude Code rewrites this file at the end of every working session and pushes it
 | SPEC §12 step | State |
 |---|---|
 | 1–3 | **Done** |
-| 4. Driver multi-file runs + length gate + hand-download check + `start_from_order` | **Code done and unit-tested. PO-TRY dry runs not yet done** (needs Kevin at an admin prompt, below). No real multi-sheet rip yet. |
+| 4. Driver multi-file runs + length gate + hand-download check + `start_from_order` | **Code done and unit-tested. 3-sheet batch dry run passed (11:05).** Length gate blocked: preview size not readable (decision needed). No real rip yet. |
 | 5–8 | Not started |
 
 Tests: `python -m unittest` from the repo root runs 121 tests, all passing.
