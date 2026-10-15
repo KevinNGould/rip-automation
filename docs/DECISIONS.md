@@ -18,6 +18,20 @@ Newest first. Claude (chat) keeps this file; Claude Code adds entries when it de
 **Proven in the trial**
 - #47918 fetched and ripped hands-free, about 30 s from New to "RIP finished". See `trial/`.
 
+**Decided (Kevin + Code, after go-live): control window, and ripping by hand ahead of the agent**
+- **Kevin: "need a more intuitive way of enabling and disabling the agent."** A "RIP Agent" desktop shortcut (`tools\make_shortcut.ps1`) opens `tools\rip_agent_control.pyw`:
+  - a coloured banner: ON (and what it's doing: next run time, or "Ripping #… 68%"), PAUSING (finishing the current run), PAUSED, OFF
+  - one big button: Pause / Resume / Start
+  - Open dashboard, Open log, and the last log lines
+
+  No admin needed: Pause/Resume toggle `state\PAUSE`; Start runs `schtasks /run` on the user's own task (checked: works unelevated, and is ignored while the agent already runs). Logic in `ripauto/control.py`, tested. The shortcut is on the 8-color PC's desktop.
+- **Kevin: "what happens if I rip it before it rips itself?"** Right before each run, the agent checks every sheet in it against two places, and marks a match by_hand (never ripped):
+  - Downloads (an app-named file with the same order # + sheet position)
+  - PO-TRY's RIP queue job names
+
+  The run is re-planned without that sheet. **Gap:** a job loaded by hand from the agent's own `8color-queue` files, with several files in one job, is only visible by its first file's name, so sheets 2+ would rip twice. Safe ways: download from the app as usual, or pause the agent first.
+- **(Code) Proposed small fix, after the first unattended run:** if a queued sheet's file has been moved out of `8color-queue` (someone took it), hold just that sheet ("file removed from queue folder; taken by hand?") and rip the rest. Today it holds the whole run for a manual check.
+
 **Decided (Kevin + Code, after step 6): dashboard build-out and order search**
 - **Kevin asked for all four:** ripped log, queue & next run, stats & history, floor TV mode. The dashboard stays **display-only for now**; Kevin will add interactive features later.
 - **Kevin (mid-build), important:** "need to be able to search logs for when we're spread out across possibly 5 machines exactly maybe where specific jobs end up".
