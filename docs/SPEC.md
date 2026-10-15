@@ -3,6 +3,8 @@
 Owner: Kevin (One Source Supply). Spec author: Claude (chat). Implementer: Claude Code.
 Status: 8-color single-sheet flow proven 2026-10-15 (#47918 fetched and ripped hands-free). This spec turns the two trial scripts into a multi-machine system. **Only the 8-color machine is enabled in v1**; the others get config slots and code paths but stay switched off.
 
+> **Amendments 2026-10-15 (after the live 8-color build).** `docs/CRITIQUE-2026-10-15.md` §C lists the changes made official. Where this spec and §C disagree, §C wins until the sections below are rewritten: routing by product ID (§2), module list and `dashboard_key` (§3), queue-unreadable and `_agent-do-not-load` (§4), Q1 as built (§6), OCR length gate, input-abort, per-picture verify, version check (§7), heartbeat extras and alerting (§8), corner warning, watchdog, control window, resume prompt (§9). Floor `start_from_order` = 47943.
+
 ---
 
 ## 1. What it does

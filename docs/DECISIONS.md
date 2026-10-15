@@ -4,6 +4,16 @@ Newest first. Claude (chat) keeps this file; Claude Code adds entries when it de
 
 ## 2026-10-15
 
+**Decided (chat, 13:40): critique of the live build**
+Full text: `docs/CRITIQUE-2026-10-15.md`. In short:
+- New risks to fix first: abort the rip sequence on any human mouse/keyboard input (A1); close PO-TRY job tabs (A4); an unreadable queue skips the cycle instead of holding sheets, error after 3 failures (B3).
+- Resume after a pause or downtime of more than 15 min asks whether the agent takes the orders that arrived meanwhile; the default is "done by hand" (A2).
+- Route by Shopify product ID, not title (A3). Replaces the "title starts with" proposal.
+- Length gate: probe intelligent layout's spacing setting to pin the gap; otherwise verify picture-by-picture when the gate can't see a missing picture (B1). Pause on a PO-TRY version change, with "Trust this version" after a dry run (B2).
+- Token: step 7 (dedicated app) this week, then rotate the shared token at a quiet time; rotate anyway if step 7 slips past a week (B6).
+- Ledger: keep JSON, add daily backups and a 60-day prune (B5). Add alerting for errors and new holds (B8).
+- Spec drift in STATUS §5 accepted; see critique §C and the amendment note at the top of SPEC.md.
+
 **Decided (Kevin)**
 - Fetch through the Shopify Admin API using the `_Print Ready File` line item attribute, not by clicking through the Build a Gang Sheet app. Verified on #47914 and #47918: same file as the app's "Gang Sheet" button (label strip + QR), and it flips the app's Downloaded counter to 1/1.
 - File names follow the app's pattern minus the design name, which Shopify doesn't store. Kevin will live without the design name.
