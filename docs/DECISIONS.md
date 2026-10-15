@@ -18,6 +18,27 @@ Newest first. Claude (chat) keeps this file; Claude Code adds entries when it de
 **Proven in the trial**
 - #47918 fetched and ripped hands-free, about 30 s from New to "RIP finished". See `trial/`.
 
+**Decided (Code, step 6 build): the agent loop**
+- **`python -m ripauto.agent --loop`:** fetch every `fetch_every_min` (2), a cycle every 20 s, heartbeats on every change plus every 30 s. Errors are logged and reported (`error` + last_error), PO-TRY is reconnected, and after a 60 s back-off it carries on; the loop never exits on its own. A failed fetch is retried at the normal 2-minute spacing.
+- **The loop stays out of PO-TRY unless it's about to rip.** People print from this PC's RIP queue, so a cycle first plans from the ledger alone. It only touches PO-TRY (to read the queue for the hand check, then rip) when all of these hold:
+  - a run is full or due
+  - nobody has used the mouse or keyboard for **`require_idle_s` = 60 s** (Windows `GetLastInputInfo`)
+  - no queue row says "Ripping"
+  - the pause switch is off
+
+  This is stricter than SPEC §9's "nobody should use the mouse during a rip": the agent waits for the PC to be idle instead of assuming it.
+- **Hand check timing:** it now runs when a run is ready (just before ripping), not on every pass. Sheets taken by hand are still caught before anything is loaded, and the per-run re-check stays.
+- **Pause switch:** while `state\PAUSE` exists, nothing new starts and the dashboard shows `stopped`. A run in progress finishes first: pause is checked between cycles and again right before a run starts, never mid-dialog. The process stays running and resumes when the file is removed (`tools\pause.cmd` / `tools\resume.cmd`). That way Task Scheduler doesn't need to restart anything; SPEC §9 says "stop", and this reads it as stop working, not exit.
+- **PO-TRY:**
+  - The loop connects only when it first needs PO-TRY (starting it if it isn't running) and maximizes it (SPEC §9).
+  - After a real rip PO-TRY is left on the **RIP queue view**, where people print the job. It used to go back to the layout view.
+- **Log:** `state\agent.log`, rotated at the first write of a new day to `agent-YYYY-MM-DD.log`, 30 days kept. `state\rip_log.txt` keeps everything before step 6. Only order numbers, file names and states are logged; never the token or the dashboard key.
+- **One loop at a time:** `state\agent.lock` holds the process id; a stale lock is taken over. While the loop runs, `fetch --download`, `fetch --mark-done` and `agent --once` refuse to run, so only one thing writes the ledger.
+- **Task Scheduler** (`tools\install_task.ps1`, run once as admin):
+  - task "OSS RIP Agent", started at logon of the current user
+  - Interactive (it needs the desktop to drive PO-TRY), Highest privileges
+  - runs `pythonw` (no console window); restart every minute on failure, up to 999 times; no time limit; one instance
+
 **Decided (Kevin, after step 5): Production Command (:8084) retired in favour of RIP Automation (:8085)**
 - Kevin: :8084 (`oss_command.py`, "Production Command") was an earlier attempt at this and is now mostly redundant.
 - **Operations Hub (:8081, `oss_uptime.py`):**

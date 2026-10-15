@@ -2,7 +2,7 @@
 
 Claude Code rewrites this file at the end of every working session and pushes it. Chat reads this file first. Decisions and open questions live in `docs/DECISIONS.md`; the spec lives in `docs/SPEC.md`. Git history holds older versions of this file.
 
-**Last updated:** 2026-10-15 ~11:56 (printer PC clock) · **SPEC §12 step 5 done; Code stops before step 6 and checks in** · **HEAD:** see `git log -1`
+**Last updated:** 2026-10-15, step 6 code done · **Waiting on Kevin to install the scheduled task (admin)** · next: dashboard build-out (Kevin asked) · **HEAD:** see `git log -1`
 
 ---
 
@@ -13,10 +13,30 @@ Claude Code rewrites this file at the end of every working session and pushes it
 | 1–3 | **Done** |
 | 4. Driver, length gate, hand check, floor | **Done.** First real agent rip 11:36 (#47946 + #47947, 135.4 in). |
 | 5. Heartbeat + Pi dashboard + leak test | **Done.** Live at **http://osshub.local:8085**. |
-| 6. Agent loop, pause switch, Task Scheduler | Not started. **Waiting for Kevin/chat to say go.** |
-| 7–8 | Not started |
+| 6. Agent loop, pause switch, Task Scheduler | **Code done + tested** (fake clock/PO-TRY). **Not yet running for real:** Kevin installs the task (below). |
+| 7. Dedicated Shopify app | Not started (needs Kevin in Shopify's Dev Dashboard). |
+| 8. CMYK + UV | Not started (needs the routing fix first). |
 
-Tests: `python -m unittest` from the repo root runs 149 on the printer PC (all pass; 7 dashboard tests skip without Flask). Those 7 pass on the hub Pi.
+Tests: `python -m unittest` from the repo root runs 162 on the printer PC (all pass; 7 dashboard tests skip without Flask). Those 7 pass on the hub Pi.
+
+## Step 6: what was built
+
+- **`agent --loop`:** fetch every 2 min, a cycle every 20 s, heartbeats throughout. It only touches PO-TRY when a run is ready, the PC has had no mouse or keyboard input for 60 s, and PO-TRY isn't ripping. Errors are logged, reported, PO-TRY is reconnected, and it carries on.
+- **Pause switch:** `tools\pause.cmd` / `tools\resume.cmd` (`state\PAUSE`). A run in progress finishes first; the dashboard shows "stopped" while paused.
+- **`tools\install_task.ps1`:** Task Scheduler "OSS RIP Agent": pythonw at logon, highest privileges, restart on failure. Also `uninstall_task.ps1` and `agent_status.cmd`.
+- **Log:** `state\agent.log`, rotated daily, 30 days kept.
+- **Lock:** one loop at a time; `fetch --download` and `agent --once` refuse while it runs.
+- After a rip, PO-TRY stays on the RIP queue view, where people print.
+- Details and reasoning: DECISIONS.md, "step 6 build".
+
+### Kevin: install it (administrator PowerShell)
+
+```
+cd C:\Users\kevin\projects\rip-automation
+powershell -ExecutionPolicy Bypass -File tools\install_task.ps1
+```
+
+It starts right away. At the time of writing, three new 8-color sheets are waiting at or above the floor: #47951 (36 in), #47952 (66 in) and #47957 (12 in). The loop will download them at once. Together they're about 120 in (not full), so they go out as one partial run ~30 min later, once nobody has touched the PC for a minute. Any of them already downloaded by hand are skipped. Watch http://osshub.local:8085 (planning → ripping with progress → idle) and `tools\agent_status.cmd`.
 
 ## After step 5 (Kevin's request)
 

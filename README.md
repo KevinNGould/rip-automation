@@ -26,6 +26,26 @@ python -m unittest                               run the tests
 
 Runtime files (ledger `state/processed.json`, run records `state/runs/`, `state/rip_log.txt`) live in `state/`, which is git-ignored.
 
+## Running unattended (Task Scheduler)
+
+Install once from an **administrator** PowerShell in the repo root:
+
+```
+powershell -ExecutionPolicy Bypass -File tools\install_task.ps1
+```
+
+This registers "OSS RIP Agent": `pythonw -m ripauto.agent --loop` at logon, with highest privileges, restart on failure and no console window. It starts right away. Day to day:
+
+- `tools\pause.cmd` / `tools\resume.cmd`: pause switch. It finishes any run in progress, then waits and shows "stopped" on the dashboard.
+- `tools\agent_status.cmd`: task state, pause switch, last log lines.
+- `state\agent.log`: the log, rotated daily (30 days kept).
+- `tools\uninstall_task.ps1` (admin): remove it.
+
+The loop:
+- fetches every 2 min and checks for a ready run every 20 s
+- only touches PO-TRY when a run is full or due, nobody has used the mouse or keyboard for 60 s, and PO-TRY isn't already ripping
+- never prints
+
 ## Pi dashboard (`dashboard/`)
 
 `oss_rip.py` runs on the hub Pi as the `oss_rip` service at http://osshub.local:8085. It's display-only; agents post heartbeats to `/api/heartbeat` with the key from `~/oss_rip_settings.json` (stored on each printer PC as `dashboard_key` in `config/secrets.json`).
