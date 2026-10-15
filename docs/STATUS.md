@@ -2,7 +2,7 @@
 
 Claude Code rewrites this file at the end of every working session and pushes it. Chat reads this file first. Decisions and open questions live in `docs/DECISIONS.md`; the spec lives in `docs/SPEC.md`. Git history holds older versions of this file.
 
-**Last updated:** 2026-10-15 ~11:55, floor set to #47943; waiting for new 8-color orders for the first real run · **HEAD:** see `git log -1`
+**Last updated:** 2026-10-15 ~12:15, #47946 + #47947 downloaded and queued; next is Kevin's agent dry run (step 4 of the path) · **HEAD:** see `git log -1`
 
 ## Latest (11:50): read this first
 
@@ -19,10 +19,14 @@ Claude Code rewrites this file at the end of every working session and pushes it
 
 ### Path to the first real multi-sheet rip
 
-1. ~~Kevin: give `start_from_order`~~ **Done ~11:55: 47943** (everything through #47942 was handled by hand). From #47943, list-only shows 0 sheets, so **we're waiting for new 8-color orders.** Leave the first few for the agent; don't hand-download them.
-2. **Code:** once some arrive, runs `fetch` **list-only** and `agent --plan` to show what would be downloaded and how it would batch. No downloads yet.
-3. **Kevin's go-ahead → Code:** `python -m ripauto.fetch --download` (downloads from the floor up; this ticks the app's counters for those orders).
-4. **Kevin, admin prompt:** `python -m ripauto.agent --once --dry-run --force`. This runs the hand check, plans, loads the first run, reads the preview and presses Cancel; the ledger stays untouched.
+1. ~~Kevin: give `start_from_order`~~ **Done ~11:55: 47943.**
+2. ~~Code: list-only + hand check~~ **Done ~12:1x:** #47946 (22×120) and #47947 (22×12, low-res) came in; both had print files and were free in the hand check.
+3. ~~Kevin's go-ahead → Code: download~~ **Done ~12:1x** (`fetch --download --limit 2`):
+   - #47946 → 121.2 in measured from the PNG
+   - #47947 → 13.2 in
+
+   `agent --plan`: one run of **135.4 in**, 2 pictures, `waiting` (not full; the flush comes 30 min after download).
+4. **← NOW. Kevin, admin prompt:** `python -m ripauto.agent --once --dry-run --force`. This runs the hand check, plans, loads the first run, reads the preview and presses Cancel; the ledger stays untouched.
 5. **Kevin's go-ahead, admin prompt:** `python -m ripauto.agent --once --force`. This is the first real run: it rips (never prints), records the run, and moves the files to `ripped\{run-id}\`.
 
 ---
