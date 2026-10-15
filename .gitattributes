@@ -1,0 +1,4 @@
+# Files that run on the Pi must keep LF endings (systemd chokes on CR).
+dashboard/* text eol=lf
+*.service text eol=lf
+*.sh text eol=lf

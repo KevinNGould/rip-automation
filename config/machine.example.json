@@ -12,7 +12,7 @@
   "gap_in": 1.0,
   "flush_after_min": 30,
   "fetch_every_min": 2,
-  "dashboard_url": "http://PI-HOSTNAME:PORT/status",
+  "dashboard_url": "http://osshub.local:8085/api/heartbeat",
   "shop": "60c3bb-3.myshopify.com",
   "api_version": "2026-04"
 }

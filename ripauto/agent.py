@@ -32,10 +32,11 @@ from datetime import datetime
 from pathlib import Path
 
 from . import ledger as L
-from .config import STATE_DIR, load_machine, load_or_exit
+from .config import STATE_DIR, load_dashboard_key, load_machine, load_or_exit
 from .handcheck import BY_HAND, FREE, download_names, hand_check, queue_job_names
 from .planner import Limits, plan
 from .potry import parse_size_cell
+from .status import NullReporter, Reporter
 
 RUNS_DIR = STATE_DIR / "runs"
 
@@ -147,14 +148,22 @@ def move_ripped(ledger, run, run_id, queue_dir):
 
 
 def cycle(cfg, ledger, driver, now, *, dl_names_fn, runs_dir=RUNS_DIR, save=lambda: None,
-          dry_run=False, force=False, max_runs=1, log=print):
-    """One pass. driver needs .queue_rows() and .rip(pictures, planned_in, dry_run).
-    On a dry run the caller's ledger is left untouched. Returns a summary dict."""
+          dry_run=False, force=False, max_runs=1, log=print, reporter=None):
+    """One pass. driver needs .queue_rows() and .rip(pictures, planned_in, dry_run,
+    on_progress). reporter (status.Reporter) gets every state change for the
+    Pi dashboard. On a dry run the caller's ledger is left untouched.
+    Returns a summary dict."""
+    reporter = reporter or NullReporter()
     if dry_run:
         ledger = copy.deepcopy(ledger)
         save = lambda: None
     limits = Limits.from_config(cfg)
     summary = {"ripped": [], "held": [], "by_hand": [], "dry_runs": [], "stopped": None}
+    reporter.update(state="planning")
+
+    def stopped(message, state="error"):
+        summary["stopped"] = message
+        reporter.update(state=state, current_run=None, last_error=message)
 
     stuck = L.in_run_keys(ledger)
     if stuck:
@@ -196,33 +205,38 @@ def cycle(cfg, ledger, driver, now, *, dl_names_fn, runs_dir=RUNS_DIR, save=lamb
         except Stop as e:
             L.hold(ledger, keys, f"manual check: {e}", now)
             save()
-            summary["stopped"] = str(e)
+            stopped(str(e))
             log(f"STOPPED before loading: {e}")
             break
 
+        reporter.update(state="ripping", current_run={
+            "id": run_id + ("-dry" if dry_run else ""), "orders": run.orders,
+            "planned_in": run.planned_in, "progress_pct": 0})
+        progress = lambda pct: reporter.update(progress_pct=pct)
         if dry_run:
-            result = driver.rip(pictures, run.planned_in, dry_run=True)
+            result = driver.rip(pictures, run.planned_in, dry_run=True, on_progress=progress)
             write_record(runs_dir, record_for(run_id + "-dry", cfg, run, pictures, result,
                                               "dry_run", True))
             summary["dry_runs"].append(run_id)
+            reporter.update(current_run=None)
             continue
 
         L.start_run(ledger, run_id, run.items, now)
         save()
         try:
-            result = driver.rip(pictures, run.planned_in, dry_run=False)
+            result = driver.rip(pictures, run.planned_in, dry_run=False, on_progress=progress)
         except Exception as e:               # Stop from the driver, or anything else
             L.hold(ledger, keys, f"manual check: run {run_id} stopped: {e}", now)
             write_record(runs_dir, record_for(run_id, cfg, run, pictures, None, "stopped", False))
             save()
-            summary["stopped"] = str(e)
+            stopped(str(e))
             log(f"STOPPED during run {run_id}: {e}")
             break
         if result["gate"]:
             L.hold(ledger, keys, f"length gate: {result['gate']}", now)
             write_record(runs_dir, record_for(run_id, cfg, run, pictures, result, "gate", False))
             save()
-            summary["stopped"] = result["gate"]
+            stopped(result["gate"], state="holding")
             log(f"Run {run_id} cancelled at the preview: {result['gate']}")
             break
         L.finish_run(ledger, run_id, run.items, now)
@@ -236,14 +250,17 @@ def cycle(cfg, ledger, driver, now, *, dl_names_fn, runs_dir=RUNS_DIR, save=lamb
             L.hold(ledger, keys, problem, now)
             write_record(runs_dir, record_for(run_id, cfg, run, pictures, result, "over_cap", False))
             save()
-            summary["stopped"] = problem
+            stopped(problem)
             log(f"Run {run_id}: {problem}")
             break
         write_record(runs_dir, record_for(run_id, cfg, run, pictures, result, "ripped", False))
         save()
         summary["ripped"].append(run_id)
+        reporter.update(current_run=None, last_error=None)
         log(f"Run {run_id} ripped: {' '.join(run.orders)}")
 
+    if not summary["stopped"]:
+        reporter.update(state="idle", current_run=None)
     summary["held"] = [k for k, r in ledger.items() if L.status(r) == L.HELD]
     summary["by_hand"] = [k for k, r in ledger.items() if L.status(r) == L.BY_HAND]
     return summary
@@ -269,11 +286,12 @@ class PotryDriver:
         self.potry.time.sleep(self.potry.SETTLE)
         return self.potry.read_queue(self.main)
 
-    def rip(self, pictures, planned_in, dry_run):
+    def rip(self, pictures, planned_in, dry_run, on_progress=None):
         try:
             return self.potry.rip_pictures(self.main, self.pid, pictures, self.cfg,
                                            planned_in, dry_run,
-                                           multi_add=self.cfg.get("multi_add", True))
+                                           multi_add=self.cfg.get("multi_add", True),
+                                           on_progress=on_progress)
         except self.potry.Stop as e:
             raise Stop(str(e)) from None
 
@@ -308,9 +326,19 @@ def main():
     hand_dir = Path(cfg["hand_download_dir"]) if cfg.get("hand_download_dir") else None
     if hand_dir is None:
         sys.exit("Set hand_download_dir in machine.json (SPEC §4).")
-    summary = cycle(cfg, ledger, driver, now, dl_names_fn=lambda: download_names(hand_dir),
-                    save=lambda: L.save(ledger), dry_run=args.dry_run, force=args.force,
-                    max_runs=args.max_runs, log=log)
+    key = load_dashboard_key()
+    if cfg.get("dashboard_url") and key:
+        reporter = Reporter(cfg, ledger, RUNS_DIR, cfg["dashboard_url"], key, log=log)
+    else:
+        log("No dashboard_url / dashboard_key set; not sending heartbeats.")
+        reporter = NullReporter()
+    reporter.start()
+    try:
+        summary = cycle(cfg, ledger, driver, now, dl_names_fn=lambda: download_names(hand_dir),
+                        save=lambda: L.save(ledger), dry_run=args.dry_run, force=args.force,
+                        max_runs=args.max_runs, log=log, reporter=reporter)
+    finally:
+        reporter.stop("stopped")             # --once ends here; the loop (step 6) won't
     log(f"Cycle done: ripped {len(summary['ripped'])}, dry runs {len(summary['dry_runs'])}, "
         f"held total {len(summary['held'])}, by hand total {len(summary['by_hand'])}"
         + (f", stopped: {summary['stopped']}" if summary["stopped"] else ""))

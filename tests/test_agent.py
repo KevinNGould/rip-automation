@@ -21,13 +21,31 @@ class FakeDriver:
     def queue_rows(self):
         return self.rows
 
-    def rip(self, pictures, planned_in, dry_run):
+    def rip(self, pictures, planned_in, dry_run, on_progress=None):
         self.calls.append(([p.name for p in pictures], planned_in, dry_run))
+        if on_progress and not dry_run:
+            for pct in (41, 87, 100):
+                on_progress(pct)
         if self.fail:
             raise Stop(self.fail)
         return {"job_name": pictures[0].stem, "preview": self.size or (22.5, planned_in),
                 "gate": self.gate, "row": None if dry_run else {"Size (inch)": self.row_size},
                 "started": "s", "ended": "e"}
+
+
+class RecordingReporter:
+    def __init__(self):
+        self.calls = []
+
+    def update(self, **kw):
+        self.calls.append(kw)
+
+    def states(self):
+        out = []
+        for c in self.calls:
+            if c.get("state") and (not out or out[-1] != c["state"]):
+                out.append(c["state"])
+        return out
 
 
 class Env:
@@ -215,6 +233,26 @@ class Cycle(unittest.TestCase):
         [rec] = [json.loads(p.read_text()) for p in self.env.runs.glob("*.json")]
         self.assertEqual(rec["actual_in"], 65.237)
         self.assertAlmostEqual(rec["gap_measured_in"], 1.02, places=2)
+
+    def test_reports_states_to_the_dashboard(self):
+        self.env.add("a", 47930, 600.0)
+        rep = RecordingReporter()
+        self.env.run(FakeDriver(), reporter=rep)
+        self.assertEqual(rep.states(), ["planning", "ripping", "idle"])
+        ripping = [u for u in rep.calls if u.get("state") == "ripping"][0]
+        self.assertEqual(ripping["current_run"]["orders"], ["#47930"])
+        self.assertEqual([u["progress_pct"] for u in rep.calls if u.get("progress_pct")], [41, 87, 100])
+
+    def test_reports_holding_and_error(self):
+        self.env.add("a", 47930, 600.0)
+        rep = RecordingReporter()
+        self.env.run(FakeDriver(gate="preview length unreadable"), reporter=rep)
+        self.assertEqual(rep.states()[-1], "holding")
+        self.assertEqual(rep.calls[-1]["last_error"], "preview length unreadable")
+        self.env.add("b", 47931, 600.0)
+        rep = RecordingReporter()
+        self.env.run(FakeDriver(fail="the job never appeared in the RIP queue"), reporter=rep)
+        self.assertEqual(rep.states()[-1], "error")
 
     def test_two_runs_in_one_cycle_get_distinct_ids(self):
         self.env.add("a", 47930, 600.0)

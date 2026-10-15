@@ -425,7 +425,7 @@ def find_row(rows, job_names, started):
     return best
 
 
-def wait_for_rip(main, job_names, started_str, started_ts):
+def wait_for_rip(main, job_names, started_str, started_ts, on_progress=None):
     """Wait until the job's queue row says the rip is done; return that row
     (or {} when only the PrnList fallback could tell)."""
     show_queue(main)
@@ -448,6 +448,11 @@ def wait_for_rip(main, job_names, started_str, started_ts):
                 raise Stop(f"PO-TRY reported an error: {err}")
             if (status, prog) != last:
                 log(f"  {status or '?'}  {prog}")
+                if on_progress and num(prog) is not None:
+                    try:
+                        on_progress(num(prog))
+                    except Exception:
+                        pass            # reporting must never stop a rip
                 if status and status not in RIPPING_STATUSES + DONE_STATUSES:
                     log(f"  (new queue status seen: {status!r}; add it to potry.py)")
                 last = (status, prog)
@@ -665,7 +670,7 @@ def pause(point):
 
 
 def rip_pictures(main, pid, pictures, cfg, planned_in, dry_run,
-                 pause_at=(), multi_add=False):
+                 pause_at=(), multi_add=False, on_progress=None):
     """Load pictures (one per copy) into one new job, F3, RIP, gate, confirm.
 
     Returns {"job_name", "preview", "gate", "row", "started", "ended"}.
@@ -728,7 +733,7 @@ def rip_pictures(main, pid, pictures, cfg, planned_in, dry_run,
     wait_for(lambda: not find_preview(main, pid), 60, "the preview to close")
     log("  rip started")
     stems = [Path(p).stem for p in dict.fromkeys(pictures)]
-    result["row"] = wait_for_rip(main, stems, started_str, started_ts)
+    result["row"] = wait_for_rip(main, stems, started_str, started_ts, on_progress)
     actual_name = (result["row"].get("Job name") or "").replace("\n", "").strip()
     if actual_name:
         result["job_name"] = actual_name        # what PO-TRY actually called it

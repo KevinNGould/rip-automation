@@ -5,8 +5,9 @@ Loads the config files (SPEC §2, §3):
                         in each (labels, enabled). Shared by every PC.
   config/machine.json   which machine this PC is, plus its local settings
                         (folders, limits). No secrets.
-  config/secrets.json   the Shopify credential only. Never logged, never sent
-                        anywhere but Shopify.
+  config/secrets.json   the Shopify credential, plus dashboard_key (the Pi
+                        dashboard's agent key). Never logged; each is sent
+                        only to its own service.
 
 machine.json and secrets.json are git-ignored. Copy the *.example.json files to start.
 """
@@ -135,6 +136,15 @@ def load_secrets(path=SECRETS_PATH):
         raise ConfigError("secrets.json: fill in either 'access_token' (shpat_...) "
                           "or both 'client_id' and 'client_secret'.")
     return sec
+
+
+def load_dashboard_key(path=SECRETS_PATH):
+    """The Pi dashboard's agent key from secrets.json, or "" if not set.
+    Sent only to the dashboard, never logged."""
+    try:
+        return str(_read(path).get("dashboard_key") or "")
+    except ConfigError:
+        return ""
 
 
 def load_or_exit(loader, *args):
