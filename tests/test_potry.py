@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 
 from ripauto.potry import (batch_pictures, copies_from_name, find_row, gate_reason,
-                           job_name_for, parse_size_cell, preview_size, rip_state)
+                           job_name_for, parse_size_cell, rip_state)
 from tests.helpers import png_bytes
 
 
@@ -31,23 +31,6 @@ class Sizes(unittest.TestCase):
         self.assertEqual(parse_size_cell("22.500×601.001"), (22.5, 601.001))
         self.assertEqual(parse_size_cell("22.500x121.200"), (22.5, 121.2))
         self.assertIsNone(parse_size_cell(""))
-
-    def test_preview_one_text(self):
-        self.assertEqual(preview_size(["Print preview", "22.500 inch × 601.001 inch"]),
-                         (22.5, 601.001))
-        self.assertEqual(preview_size(["22.500 inch x 601.001 inch"]), (22.5, 601.001))
-
-    def test_preview_two_texts(self):
-        self.assertEqual(preview_size(["Width", "22.500 inch", "Height", "10.257 inch"]),
-                         (22.5, 10.257))
-
-    def test_preview_swapped_when_width_is_obvious(self):
-        self.assertEqual(preview_size(["601.001 inch", "22.500 inch"], max_width_in=23),
-                         (22.5, 601.001))
-
-    def test_preview_unreadable(self):
-        self.assertIsNone(preview_size(["Print preview", "Print", "Cancel"]))
-        self.assertIsNone(preview_size(["22.5 inch", "601 inch", "300 inch"]))
 
 
 class Gate(unittest.TestCase):

@@ -134,37 +134,12 @@ def rip_state(status, processing):
 
 
 _PAIR = re.compile(r"(\d+(?:\.\d+)?)\s*(?:inch|in)?\s*[×xX*]\s*(\d+(?:\.\d+)?)\s*(?:inch|in)?", re.I)
-_ONE_INCH = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*inch(?:es)?\s*$", re.I)
 
 
 def parse_size_cell(text):
     """'22.500×601.001' (queue Size column) -> (22.5, 601.001), else None."""
     m = _PAIR.search(text or "")
     return (float(m.group(1)), float(m.group(2))) if m else None
-
-
-def preview_size(texts, max_width_in=None):
-    """(width, length) in inches from the Print preview's UI texts, else None.
-
-    Accepts one text holding both ('22.500 inch × 601.001 inch') or exactly two
-    texts that are each just 'N inch', in UI order (width first). If the first
-    value is clearly too wide to be the width and the second isn't, they're
-    swapped. Anything else is unreadable: the gate cancels on unreadable."""
-    for t in texts:
-        t = t or ""
-        both = "×" in t or re.search(r"inch\s*[xX*]", t)
-        pair = parse_size_cell(t) if "inch" in t.lower() and both else None
-        if pair:
-            w, l = pair
-            break
-    else:
-        singles = [float(m.group(1)) for t in texts if (m := _ONE_INCH.match(t or ""))]
-        if len(singles) != 2:
-            return None
-        w, l = singles
-    if max_width_in and w > max_width_in + 1 and l <= max_width_in + 1:
-        w, l = l, w
-    return w, l
 
 
 def gate_reason(size, cap_in, planned_in):
@@ -622,13 +597,40 @@ def intelligent_layout(main):
     log(f"  F3 done  {fmt(layout_values(main))}")
 
 
-def preview_texts(preview):
-    texts = [name_of(preview)]
-    for d in preview.descendants():
-        t = name_of(d)
-        if t:
-            texts.append(t)
-    return texts
+PREVIEW_DIR = STATE_DIR / "previews"
+
+
+def capture_preview(preview):
+    """Image of the preview's drawing area (the QGraphicsView holding the
+    sheet and its size labels), or None if it can't be found or captured."""
+    views = [d for d in preview.descendants()
+             if d.element_info.class_name == "QGraphicsView" and visible(d)]
+    if not views:
+        return None
+    view = max(views, key=lambda v: v.rectangle().width() * v.rectangle().height())
+    try:
+        return view.capture_as_image()
+    except Exception:
+        try:
+            from PIL import ImageGrab
+            r = view.rectangle()
+            return ImageGrab.grab(bbox=(r.left, r.top, r.right, r.bottom), all_screens=True)
+        except Exception:
+            return None
+
+
+def read_preview(preview, job, max_width_in):
+    """(width, length) read off the preview by OCR, or None (SPEC §7 step 6)."""
+    from .ocr import read_preview_size
+    image = capture_preview(preview)
+    if image is None:
+        log("  couldn't capture the preview's drawing area")
+        return None
+    stem = f"{datetime.now():%Y%m%d-%H%M%S}-{job[:40]}"
+    size, seen = read_preview_size(image, PREVIEW_DIR, stem, max_width_in)
+    if size is None:
+        log(f"  OCR across: {seen['across']}   sideways: {seen['sideways']}")
+    return size
 
 
 def pause(point):
@@ -678,12 +680,9 @@ def rip_pictures(main, pid, pictures, cfg, planned_in, dry_run,
     if not (print_btn and cancel_btn):
         raise Stop("the preview's Print/Cancel buttons couldn't be confirmed")
 
-    texts = preview_texts(preview)
-    size = preview_size(texts, cfg.get("max_width_in"))
+    size = read_preview(preview, job, cfg.get("max_width_in"))
     gate = gate_reason(size, cfg["cap_in"], planned_in)
-    log(f"  preview size: {size}   gate: {gate or 'ok'}")
-    if dry_run or size is None:
-        log("  preview texts: " + " | ".join(t for t in texts if t)[:2000])
+    log(f"  preview size: {size}   planned {planned_in:.1f} in   gate: {gate or 'ok'}")
     if "preview" in pause_at:
         pause("the Print preview")
     result = {"job_name": job, "preview": size, "gate": gate, "row": None,
