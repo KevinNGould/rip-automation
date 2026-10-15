@@ -4,7 +4,8 @@ from datetime import datetime
 from pathlib import Path
 
 from ripauto.config import ConfigError
-from ripauto.fetch import built_name, ledger_record, match_rule, sheets_from_orders
+from ripauto.fetch import (built_name, ledger_record, match_rule, order_floor,
+                           sheets_from_orders)
 from tests.helpers import CMYK, EIGHT, IMAGE_BY_SIZE, RULES, line, order, png_bytes
 
 
@@ -54,6 +55,20 @@ class SheetsFromOrders(unittest.TestCase):
         rules = RULES + [{"title_contains": "Color-Pro", "kind": "gang_sheet", "line": "uv"}]
         with self.assertRaises(ConfigError):
             sheets_from_orders([order("#1", "1", [line(1)])], rules, "8color")
+
+
+class OrderFloor(unittest.TestCase):
+    def test_download_without_floor_refused(self):
+        with self.assertRaisesRegex(ConfigError, "start_from_order"):
+            order_floor(0, {"start_from_order": None}, downloading=True)
+
+    def test_listing_without_floor_is_fine(self):
+        self.assertEqual(order_floor(0, {"start_from_order": None}, downloading=False), 0)
+
+    def test_config_floor_and_cli_override(self):
+        cfg = {"start_from_order": 47930}
+        self.assertEqual(order_floor(0, cfg, downloading=True), 47930)
+        self.assertEqual(order_floor(47935, cfg, downloading=True), 47935)
 
 
 class MatchRule(unittest.TestCase):

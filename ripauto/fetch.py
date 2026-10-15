@@ -16,7 +16,11 @@ Usage (from the repo root):
   python -m ripauto.fetch --mark-done     record everything currently listed as
                                           already handled (no downloads)
   python -m ripauto.fetch --from 47910    ignore orders numbered below 47910
+                                          (default: start_from_order in machine.json)
   python -m ripauto.fetch --download --limit 1   download just one sheet
+
+--download refuses to run without a floor (start_from_order or --from), so
+the backlog of old unfulfilled orders is never pulled in by accident.
 
 Standard library only; needs Python 3.9+.
 """
@@ -31,10 +35,10 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
-from .config import STATE_DIR, ConfigError, load_machine, load_or_exit, load_secrets
+from . import ledger as ledgers
+from .config import ConfigError, load_machine, load_or_exit, load_secrets
 from .sheets import file_stem, print_ready_positions, safe_name, sheet_size
 
-LEDGER_PATH = STATE_DIR / "processed.json"
 MAX_PAGES = 10  # 50 orders per page
 ENABLED_KINDS = ("gang_sheet",)   # image_by_size stays off until verified (SPEC §2)
 
@@ -60,19 +64,18 @@ query($cursor: String) {
 NAME_FIELDS = "customer { displayName } billingAddress { name } shippingAddress { name }"
 
 
-# ---------- ledger ----------
+# ---------- floor ----------
 
-def load_ledger():
-    if LEDGER_PATH.exists():
-        return json.loads(LEDGER_PATH.read_text(encoding="utf-8"))
-    return {}
+def order_floor(cli_from, cfg, downloading):
+    """Lowest order number to look at: --from, else start_from_order.
 
-
-def save_ledger(ledger):
-    LEDGER_PATH.parent.mkdir(parents=True, exist_ok=True)
-    tmp = LEDGER_PATH.with_suffix(".tmp")
-    tmp.write_text(json.dumps(ledger, indent=2), encoding="utf-8")
-    tmp.replace(LEDGER_PATH)
+    Downloading with no floor at all is refused (SPEC §4 go-live floor);
+    listing is fine."""
+    floor = cli_from or cfg.get("start_from_order") or 0
+    if downloading and not floor:
+        raise ConfigError("set start_from_order in machine.json (or pass --from) before "
+                          "downloading, so old unfulfilled orders aren't pulled in")
+    return floor
 
 
 # ---------- product rules ----------
@@ -256,6 +259,8 @@ def ledger_record(sheet, path, now=None):
         "low_res": sheet["low_res"],
         "file": str(path),
         "fetched_at": (now or datetime.now()).isoformat(timespec="seconds"),
+        "status": ledgers.QUEUED,
+        "copies_ripped": 0,
     }
 
 
@@ -265,23 +270,31 @@ def main():
     ap = argparse.ArgumentParser(description="List or download this machine's gang sheets.")
     ap.add_argument("--download", action="store_true", help="download new sheets")
     ap.add_argument("--mark-done", action="store_true", help="record current list as handled")
-    ap.add_argument("--from", dest="min_order", type=int, default=0, help="lowest order number to include")
+    ap.add_argument("--from", dest="min_order", type=int, default=0,
+                    help="lowest order number to include (default: start_from_order)")
     ap.add_argument("--limit", type=int, default=0, help="max sheets to download this run")
     args = ap.parse_args()
 
     cfg = load_or_exit(load_machine)
     secrets = load_or_exit(load_secrets)
-    ledger = load_ledger()
+    try:
+        floor = order_floor(args.min_order, cfg, args.download)
+    except ConfigError as e:
+        sys.exit(f"Not downloading: {e}.")
+    ledger = ledgers.load()
     token = get_token(cfg, secrets)
     try:
-        sheets = find_sheets(cfg, token, args.min_order)
+        sheets = find_sheets(cfg, token, floor)
     except ConfigError as e:
-        sys.exit(f"machine.json: {e}")
+        sys.exit(f"machines.json: {e}")
     new = [s for s in sheets if s["line_id"] not in ledger]
 
-    print(f"\n{cfg['label']} sheets on unfulfilled orders: {len(sheets)}   not yet handled: {len(new)}\n")
+    from_note = f" from #{floor}" if floor else ""
+    print(f"\n{cfg['label']} sheets on unfulfilled orders{from_note}: {len(sheets)}   "
+          f"not yet handled: {len(new)}\n")
     for s in sheets:
-        status = "done" if s["line_id"] in ledger else "NEW"
+        rec = ledger.get(s["line_id"])
+        status = ledgers.status(rec) if rec else "NEW"
         flags = []
         if s["low_res"]:
             flags.append("LOW-RES")
@@ -291,13 +304,13 @@ def main():
             flags.append(f"SHEET {s['position']} OF ORDER")
         if not s["url"]:
             flags.append("NO FILE LINK")
-        print(f"  {status:4}  {s['order']:8} {s['size']:22} {'  '.join(flags)}")
+        print(f"  {status:9}  {s['order']:8} {s['size']:22} {'  '.join(flags)}")
 
     if args.mark_done:
         stamp = datetime.now().isoformat(timespec="seconds")
         for s in new:
             ledger[s["line_id"]] = {"order": s["order"], "marked_done": stamp}
-        save_ledger(ledger)
+        ledgers.save(ledger)
         print(f"\nMarked {len(new)} sheet(s) as handled. Nothing was downloaded.")
         return
 
@@ -318,7 +331,7 @@ def main():
             continue
         rec = ledger_record(s, path)
         ledger[s["line_id"]] = rec
-        save_ledger(ledger)
+        ledgers.save(ledger)
         length = (f"{rec['length_in']:.1f} in ({rec['length_source']})"
                   if rec["length_in"] else "length unknown")
         print(f"  ok  {s['order']} -> {path.name}   {length}")

@@ -1,6 +1,8 @@
 {
   "machine_id": "8color-1",
   "queue_dir": "C:\\Users\\kevin\\Downloads\\8color-queue",
+  "hand_download_dir": "C:\\Users\\kevin\\Downloads",
+  "start_from_order": null,
   "potry_exe": "C:\\Program Files\\PO-TRY\\MtFlatbedPrinterApp.exe",
   "potry_prnlist": "C:\\Program Files\\PO-TRY\\PrnList",
   "cap_in": 650,

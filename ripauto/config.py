@@ -32,6 +32,7 @@ MACHINE_DEFAULTS = {
     "flush_after_min": 30,
     "fetch_every_min": 2,
     "max_width_in": None,      # printable width; None = not checked
+    "start_from_order": None,  # go-live floor (SPEC §4); fetch --download refuses without it
 }
 
 
@@ -107,6 +108,10 @@ def load_machine(path=MACHINE_PATH, shop_path=MACHINES_PATH):
         raise ConfigError(f"machine.json: missing or empty {', '.join(missing)}")
     if not cfg["target_in"] + cfg["window_in"] <= cfg["cap_in"]:
         raise ConfigError("machine.json: target_in + window_in must not exceed cap_in")
+    hand = cfg.get("hand_download_dir")
+    if hand and Path(hand).resolve() == Path(cfg["queue_dir"]).resolve():
+        raise ConfigError("machine.json: hand_download_dir must not be the queue_dir; "
+                          "the agent's own downloads would look like hand downloads")
 
     shop = load_shop(shop_path)
     me = shop["machines"].get(cfg["machine_id"])
