@@ -2,7 +2,24 @@
 
 Claude Code rewrites this file at the end of every working session and pushes it. Chat reads this file first. Decisions and open questions live in `docs/DECISIONS.md`; the spec lives in `docs/SPEC.md`. Git history holds older versions of this file.
 
-**Last updated:** 2026-10-15 ~12:30 (printer PC clock) · step 6 code done + dashboard build-out live · **Waiting on Kevin to install the scheduled task (admin)** · **HEAD:** see `git log -1`
+**Last updated:** 2026-10-15 ~12:28 (printer PC clock) · **The 8-color agent is LIVE and unattended** (Task Scheduler, since 12:26) · **HEAD:** see `git log -1`
+
+## Go-live (12:26)
+
+- Kevin installed the task (`tools\install_task.ps1`): "OSS RIP Agent" running as 8-COLOR\kevin, last result 267009 (running).
+- `state\agent.log`: loop started 12:26:14. The first fetch downloaded **5** sheets at or above the floor:
+
+  | Order | Measured |
+  |---|---|
+  | #47951 | 37.2 in |
+  | #47952 | 67.2 in |
+  | #47957 | 13.2 in |
+  | #47960 | 156.6 in |
+  | #47964 | 25.2 in |
+
+- Plan: one run of **303.4 in**, 5 pictures, not full. It's due at **12:56** (30-min flush), then rips once the PC has had a minute without mouse or keyboard.
+- Dashboard: Printer #3 is **running / idle** and heard within seconds. Next run 303.4 in at 12:56; order search finds #47960 "waiting".
+- **Not yet seen:** the first unattended rip (due ~12:56). Next session: check `state\agent.log`, the dashboard's ripped log, and the run record.
 
 ## Latest: dashboard build-out + order search (live at http://osshub.local:8085)
 
@@ -21,7 +38,7 @@ Claude Code rewrites this file at the end of every working session and pushes it
 | 1–3 | **Done** |
 | 4. Driver, length gate, hand check, floor | **Done.** First real agent rip 11:36 (#47946 + #47947, 135.4 in). |
 | 5. Heartbeat + Pi dashboard + leak test | **Done.** Live at **http://osshub.local:8085**. |
-| 6. Agent loop, pause switch, Task Scheduler | **Code done + tested** (fake clock/PO-TRY). **Not yet running for real:** Kevin installs the task (below). |
+| 6. Agent loop, pause switch, Task Scheduler | **Done; live since 12:26** (Task Scheduler). First unattended rip due ~12:56. |
 | 7. Dedicated Shopify app | Not started (needs Kevin in Shopify's Dev Dashboard). |
 | 8. CMYK + UV | Not started (needs the routing fix first). |
 
