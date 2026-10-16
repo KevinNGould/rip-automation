@@ -13,7 +13,8 @@ PINK = (230, 0, 230)
 DARK = (45, 45, 45)
 
 
-def fake_preview(width_text, length_text, sheet_h=430, sheet_w=150, width_line_from=None):
+def fake_preview(width_text, length_text, sheet_h=430, sheet_w=150, width_line_from=None,
+                 tick_through_label_at=None):
     """A stand-in for PO-TRY's preview: dark area, white sheet, pink dimension
     lines with ticks touching the labels, width label above the sheet and the
     length label turned sideways on the left line, breaking it in two."""
@@ -29,6 +30,10 @@ def fake_preview(width_text, length_text, sheet_h=430, sheet_w=150, width_line_f
     d.line((left + sheet_w, 8, left + sheet_w, top), fill=PINK)
     d.rectangle((left + 25, 9, left + sheet_w - 25, 27), fill=DARK)
     d.text((left + 28, 9), width_text, font=font, fill=(255, 255, 255))
+    if tick_through_label_at is not None:
+        # a very long sheet is drawn narrower than its label: a tick crosses the text
+        d.line((left + 28 + tick_through_label_at, 8, left + 28 + tick_through_label_at, top),
+               fill=PINK)
     # length line on the left, corner ticks at the sheet's top and bottom
     x = 80
     d.line((x, top, x, top + sheet_h), fill=PINK)
@@ -51,6 +56,8 @@ class Parse(unittest.TestCase):
         self.assertEqual(inch_values(["135400 inch"]), [135.4])
         self.assertEqual(inch_values(["7200 inch"]), [7.2])
         self.assertEqual(inch_values(["650 inch"]), [650.0])     # 3 digits: left alone
+        # 2026-10-16 02:44, #48029: "22.500 irch" (a tick through the n) and "260451 inch".
+        self.assertEqual(size_from_ocr(["22.500 irch"], ["260451 inch"], 23), (22.5, 260.451))
 
     def test_size_from_ocr(self):
         self.assertEqual(size_from_ocr(["22.500 inch", "THE DEARBORN ACADEMY"], ["65.237 inch"], 23),
@@ -78,6 +85,19 @@ class Geometry(unittest.TestCase):
         img = fake_preview("22.500 inch", "195.037 inch", width_line_from=60)
         self.assertEqual(length_line(img), (80, 30))
 
+    def test_pink_line_through_a_letter_keeps_the_stroke(self):
+        # 2026-10-16 02:44: the width tick ran through the "n" of "inch".
+        from ripauto.ocr import SCALE, clean
+        img = Image.new("RGB", (9, 9), (40, 40, 40))
+        d = ImageDraw.Draw(img)
+        d.rectangle((3, 0, 5, 8), fill=(255, 255, 255))       # a stem 3 px wide
+        d.line((4, 0, 4, 8), fill=PINK)                        # tick down its middle
+        d.line((7, 0, 7, 8), fill=PINK)                        # tick over background
+        out = clean(img)
+        mid = lambda x: out.getpixel((x * SCALE + 1, 4 * SCALE + 1))
+        self.assertGreater(min(mid(4)), 200)                   # stem whole
+        self.assertLess(max(mid(7)), 60)                       # background stays dark
+
     def test_no_pink_no_line(self):
         self.assertIsNone(length_line(Image.new("RGB", (100, 100), DARK)))
 
@@ -98,6 +118,10 @@ class WindowsOcr(unittest.TestCase):
     def test_reads_a_narrow_run_with_crossing_width_line(self):
         size, seen = self.read(fake_preview("22.500 inch", "195.037 inch", width_line_from=60))
         self.assertEqual(size, (22.5, 195.037), seen)
+
+    def test_reads_a_long_run_with_a_tick_through_the_width_label(self):
+        size, seen = self.read(fake_preview("22.500 inch", "260.451 inch", tick_through_label_at=58))
+        self.assertEqual(size, (22.5, 260.451), seen)
 
     def test_reads_a_short_run(self):
         size, seen = self.read(fake_preview("22.500 inch", "135.400 inch", sheet_h=200))

@@ -2,6 +2,14 @@
 
 Newest first. Claude (chat) keeps this file; Claude Code adds entries when it decides something during the build. Build progress and next steps are in `docs/STATUS.md`.
 
+## 2026-10-16
+
+**Built (Code, 08:30): OCR keeps letters whole where a pink tick crosses the width label**
+- At 02:44, #48029 (260 in) was cancelled with "preview length unreadable". The sheet is drawn narrower than its label on long runs, so a tick crossed the "n" of "inch" and OCR read "irch".
+- `clean()` no longer paints pink to flat background. A pink pixel whose nearest non-pink pixels on both sides (left/right, else up/down) are lit (any channel > 75, which covers ClearType fringes) becomes white text; otherwise it becomes background.
+- `_INCH` also accepts "irch". It's safe because the width must still be 20–24 in, and there must be exactly one value per label.
+- All 14 saved previews read correctly with the new code.
+
 ## 2026-10-15
 
 **Built (Code, 14:30): wait for big pictures to finish loading; retry a short preview**

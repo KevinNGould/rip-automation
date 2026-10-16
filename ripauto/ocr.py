@@ -34,7 +34,7 @@ STRIP = 14           # half-height of a label strip, in captured pixels
 MIN_SEGMENT = 8      # pink pixels in a row that count as the length line itself
 BACKGROUND = (45, 45, 45)
 
-_INCH = re.compile(r"(\d+(?:[.,]\d+)?)\s*inch", re.I)
+_INCH = re.compile(r"(\d+(?:[.,]\d+)?)\s*i[nr]ch", re.I)   # "irch" seen 2026-10-16 02:44
 
 
 # ---------------- parsing ----------------
@@ -104,14 +104,43 @@ def length_line(image):
     return None
 
 
+TEXT = (255, 255, 255)
+LIT = 75             # any channel above this next to a line is (ClearType-tinted) label text
+
+
+def _fill(src, xx, yy, w, h, reach=3):
+    """What a pink pixel would be without the line. The labels are white text
+    on dark, drawn with ClearType colour fringes; so with lit pixels on both
+    sides of it (left/right first, then up/down) it was text, else background."""
+    def nearest(dx, dy):
+        for step in range(1, reach + 1):
+            x2, y2 = xx + dx * step, yy + dy * step
+            if not (0 <= x2 < w and 0 <= y2 < h):
+                return None
+            if not is_pink(src[x2, y2]):
+                return src[x2, y2]
+        return None
+    for a, b in ((nearest(-1, 0), nearest(1, 0)), (nearest(0, -1), nearest(0, 1))):
+        if a and b:
+            return TEXT if max(a[:3]) > LIT and max(b[:3]) > LIT else BACKGROUND
+    return BACKGROUND
+
+
 def clean(image):
-    """Paint pink out to the background, then scale up for OCR."""
+    """Paint pink out, then scale up for OCR.
+
+    On a very long sheet the preview draws the sheet narrower than its own
+    width label, and the width line's end tick runs through the text
+    (2026-10-16 02:44: "22.500 irch"). So a pink pixel takes the colour of
+    its neighbours rather than flat background: a letter stroke it crosses
+    stays whole."""
     img = image.convert("RGB")
+    src = img.copy().load()
     px = img.load()
     for yy in range(img.height):
         for xx in range(img.width):
-            if is_pink(px[xx, yy]):
-                px[xx, yy] = BACKGROUND
+            if is_pink(src[xx, yy]):
+                px[xx, yy] = _fill(src, xx, yy, img.width, img.height)
     return img.resize((img.width * SCALE, img.height * SCALE), Image.LANCZOS)
 
 

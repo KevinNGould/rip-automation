@@ -4,7 +4,18 @@ Claude Code rewrites this file at the end of every working session and pushes it
 
 **Last updated:** 2026-10-15 ~14:30 (printer PC clock) · **HEAD:** see `git log -1`
 
-## Latest (22:40): first unattended evening: 5 runs, all ripped, none held
+## Latest (10-16 08:30): overnight, 1 run ripped, 1 cancelled by an OCR misread (fixed, not live)
+
+- **00:26 #48022 + #48025:** ripped, 104.017 in (926 of 216 MB read, quiet after 20 s).
+- **02:43 #48029 (180 in + 78 in sheets, planned 260.4):** cancelled with "preview length unreadable". OCR read "22.500 **irch**" and "260451 inch". Both sheets are **held**.
+  - Cause: on a very long sheet the preview draws the sheet only ~38 px wide, narrower than its own "22.500 inch" label. The width line's pink end tick runs through the "n". The cleaner painted pink to flat grey, which cut the letter, so OCR read "irch" and the width was dropped.
+  - Fix (`ocr.py`): a pink pixel with lit text pixels on both sides becomes white text, otherwise background. The parser also accepts "irch".
+  - Re-run on all 14 saved previews: every one reads right, including this one as 22.5 × 260.451.
+  - Tests: a stroke test and a parse test; both fail on the old code. 213 pass.
+- **Download "WinError 32 … .part" happened again** at 00:23 (#48025) and 02:09 (#48029 ×2). Each time it was the first try at a brand-new order, 1 s in, and the retry 2 min later worked. Last night's tolerant cleanup handles it once the agent restarts.
+- **Not live yet:** both fixes need Restart agent. #48029 needs Kevin's call: re-queue it (it would rip right after the 60 s warning, since its flush time is long past) or rip it by hand.
+
+## Earlier (22:40): first unattended evening: 5 runs, all ripped, none held
 
 Kevin watched over RustDesk. The agent (pid 20268) ran from 14:16 without a restart.
 
