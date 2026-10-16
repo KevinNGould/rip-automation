@@ -221,9 +221,16 @@ def download(sheet, folder):
         while chunk := r.read(1 << 20):
             f.write(chunk)
     with open(part, "rb") as f:
-        if f.read(8) != b"\x89PNG\r\n\x1a\n":
+        is_png = f.read(8) == b"\x89PNG\r\n\x1a\n"
+    if not is_png:
+        # Usually the app is still making a big sheet; the next fetch tries
+        # again. A virus scan may still hold the .part (2026-10-15 22:03,
+        # WinError 32); the next download overwrites it anyway.
+        try:
             part.unlink()
-            raise ValueError("downloaded file is not a PNG")
+        except OSError:
+            pass
+        raise ValueError("downloaded file is not a PNG (yet); trying again next fetch")
 
     # Prefer the app's own name if its server sends one and it's for this order.
     stem = None

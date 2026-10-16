@@ -4,7 +4,25 @@ Claude Code rewrites this file at the end of every working session and pushes it
 
 **Last updated:** 2026-10-15 ~14:30 (printer PC clock) · **HEAD:** see `git log -1`
 
-## Latest (14:40): load-wait fix is LIVE; #47977 + #47979 ripped; unattended evening next
+## Latest (22:40): first unattended evening: 5 runs, all ripped, none held
+
+Kevin watched over RustDesk. The agent (pid 20268) ran from 14:16 without a restart.
+
+| Run | Orders | Planned | Preview / queue | Load wait |
+|---|---|---|---|---|
+| 16:02 | #47984 #47986 | 104.9 | 104.897 | 53 of 13 MB read, quiet after 15 s |
+| 17:42 | #47996 | 22.1 | 22.077 | 78 of 20 MB, 8 s |
+| 18:56 | #48001 ×3 sheets | 41.6 | 41.600 | 16 of 4 MB, 6 s |
+| 21:43 | #48009 #48011 | 69.4 | 69.400 | 216 of 45 MB, 12 s |
+| 22:30 | #48015 #48017 | 189.4 | 189.400 | 826 of 182 MB, 34 s |
+
+- **Load wait proven on fresh files.** PO-TRY's read counter does count loads from disk; it reads ~4× the file size. So the wait is "read it all + CPU quiet". Every gate passed first time, with no retries needed.
+- **22:03 download hiccup, #48017 (168 in sheet):** "PermissionError WinError 32 … .part", 1 s into the download. It retried at 22:05, and the sheet ripped in the 22:30 run.
+  - Likely cause (not proven): the app hadn't finished making the big sheet, so the response wasn't a PNG, and a virus scan was holding the `.part` when the agent tried to delete it.
+  - Fix: the cleanup now tolerates that, and the log says "not a PNG (yet); trying again next fetch". It takes effect at the next agent restart; no rush.
+- Dashboard timeouts at 15:31 and 21:57: one heartbeat each, carried on.
+
+## Earlier (14:40): load-wait fix is LIVE; #47977 + #47979 ripped; unattended evening next
 
 - 14:16: agent stopped, `python -m ripauto.ledger --requeue 47977 47979` (new command; it refuses while the agent runs), started again (pid 20268, pause off).
 - 14:18: Kevin forced the run (Rip now). The log read "68 of 357 MB read and nothing happening for 15 s; going on". As Kevin pointed out, PO-TRY reloads pictures it has already loaded from its own memory. Preview 295.424 = planned, gate ok, ripped 14:26, and the finished job's tab was closed.
