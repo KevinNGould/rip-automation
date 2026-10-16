@@ -4,7 +4,13 @@ Claude Code rewrites this file at the end of every working session and pushes it
 
 **Last updated:** 2026-10-15 ~14:30 (printer PC clock) · **HEAD:** see `git log -1`
 
-## Latest (10-16 08:30): overnight, 1 run ripped, 1 cancelled by an OCR misread (fixed, not live)
+## Latest (10-16 08:31): OCR fix LIVE; #48029 ripped (260.451 in)
+
+- 08:26: agent stopped, `ledger --requeue 48029`, started again (pid 9292, pause off) on the OCR fix and the tolerant download cleanup.
+- 08:27 warning → 08:29 preview read **22.5 × 260.451** (gate ok) → ripped 08:30 → tab closed. Nothing is held.
+- Load wait: "22 of 105 MB read and nothing happening for 15 s". PO-TRY still had these pictures in memory from 02:43, as expected.
+
+## Earlier (10-16 08:30): overnight, 1 run ripped, 1 cancelled by an OCR misread
 
 - **00:26 #48022 + #48025:** ripped, 104.017 in (926 of 216 MB read, quiet after 20 s).
 - **02:43 #48029 (180 in + 78 in sheets, planned 260.4):** cancelled with "preview length unreadable". OCR read "22.500 **irch**" and "260451 inch". Both sheets are **held**.
