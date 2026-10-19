@@ -4,9 +4,15 @@ Claude Code rewrites this file at the end of every working session and pushes it
 
 **Last updated:** 2026-10-15 ~14:30 (printer PC clock) · **HEAD:** see `git log -1`
 
-## Latest (10-19 13:50): 4 days unattended: 27 ripped, 3 cancelled by OCR misreads (fixed, not live)
+## Latest (10-19 13:55): OCR fix LIVE; queue clear
 
-- **Agent is PAUSED** (Kevin, from the rip warning, 13:28:25). #48263 and #48266 are queued. #48134 has been **held** since 10-16 20:19 (needs Kevin's call: probably done by hand).
+- 13:42: restarted on the OCR fix and resumed. #48134 was re-queued per Kevin.
+- The hand check found #48134 and #48266 already in PO-TRY's queue, both ripped by hand, so they're marked `by_hand`. The agent ripped #48263 (25.2 in, gate ok). Nothing is queued or held.
+- That run's warning was 10 s, not 60: Kevin's 13:24 Rip-now press had outlived two interruptions, a Pause and a restart. **Fixed:** Pause and an interrupted run now cancel a pending Rip now (tests added, 218 pass). The agent was restarted onto this at ~13:55.
+
+## Earlier (10-19 13:50): 4 days unattended: 27 ripped, 3 cancelled by OCR misreads
+
+- **Agent was PAUSED** (Kevin, from the rip warning, 13:28:25). #48263 and #48266 were queued. #48134 had been **held** since 10-16 20:19.
 - The 3 cancels were OCR reading "4" as "A" and "0" as "O" ("183A00", "48.1 OO"). The fix maps them back and tries a second zoom when in doubt. All 41 saved previews replay correctly. Details: DECISIONS.md, top entry.
 - Also seen: 2 hands-off stops at 13:26 and 13:28 (Kevin at the PC, guard working). 4 "not a PNG (yet)" download retries that recovered. 9 dashboard heartbeat timeouts that carried on.
 - **To go live:** Restart agent, then Resume.

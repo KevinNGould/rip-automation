@@ -478,6 +478,14 @@ def run_loop(cfg, ledger, driver, *, fetcher, dl_names_fn, reporter, save, log,
                 log(f"Paused ({pause_path.name} exists). Delete it or run tools\\resume.cmd to carry on.")
                 reporter.update(state="stopped", current_run=None)
                 paused = True
+            if rip_now_path.exists():
+                # Pause cancels a pending Rip now: after Resume (or a restart)
+                # the next run gets the full warning (2026-10-19 13:42).
+                try:
+                    rip_now_path.unlink()
+                    log("Rip now cancelled by Pause.")
+                except OSError:
+                    pass
             gate.reset()
             sleep(10)
             continue
@@ -517,7 +525,10 @@ def run_loop(cfg, ledger, driver, *, fetcher, dl_names_fn, reporter, save, log,
                                  "Rip interrupted: someone used the mouse or keyboard. Trying again.")
             elif summary["waiting"] not in (COUNTDOWN, UNREADABLE):
                 gate.reset()                       # run went, or isn't ready any more
-            if rip_now and summary["waiting"] not in (COUNTDOWN, BUSY, UNREADABLE, INTERRUPTED):
+            # An interrupted run drops the Rip now too: a person stepped in, so the
+            # retry gets the full warning (2026-10-19: one press outlived two
+            # interruptions, a Pause and a restart).
+            if rip_now and summary["waiting"] not in (COUNTDOWN, BUSY, UNREADABLE):
                 if summary["waiting"] in ("nothing queued", "no run ready yet"):
                     log("Rip now: nothing is waiting to rip.")
                 try:

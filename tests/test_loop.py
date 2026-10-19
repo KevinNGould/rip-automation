@@ -222,6 +222,26 @@ class Loop(unittest.TestCase):
         self.assertFalse(restart.exists())
         self.assertEqual(self.fetches, 0)
 
+    def test_pause_cancels_a_pending_rip_now(self):
+        self.add("a", 47950, 100.0)
+        self.rip_now.write_text("")
+        self.pause.write_text("")
+        d = FakeDriver()
+        self.loop(d, max_sleeps=3)
+        self.assertEqual(d.calls, [])
+        self.assertFalse(self.rip_now.exists())
+        self.assertIn("Rip now cancelled by Pause.", self.logs)
+
+    def test_interrupted_rip_now_retries_with_the_full_wait(self):
+        self.add("a", 47950, 100.0)                                # not full, not due
+        self.rip_now.write_text("")
+        d = FakeDriver()
+        d.interrupt = 1
+        self.loop(d, max_sleeps=10)
+        self.assertEqual(len(d.calls), 1)                          # interrupted, no quick second go
+        self.assertFalse(self.rip_now.exists())
+        self.assertIn("Trying again in 5 min.", self.logs)
+
     def test_rip_now_with_nothing_waiting(self):
         self.rip_now.write_text("")
         self.loop(FakeDriver(), max_sleeps=2)
