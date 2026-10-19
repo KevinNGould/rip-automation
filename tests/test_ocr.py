@@ -56,6 +56,16 @@ class Parse(unittest.TestCase):
         self.assertEqual(inch_values(["135400 inch"]), [135.4])
         self.assertEqual(inch_values(["7200 inch"]), [7.2])
         self.assertEqual(inch_values(["650 inch"]), [650.0])     # 3 digits: left alone
+        # Every misread in the saved previews, 2026-10-15..19: "4" read as "A",
+        # "0" as "O", stray spaces, decimal point lost.
+        for text, want in [("183A00 inch", 183.4), ("183 AOO inch", 183.4), ("48.1 OO inch", 48.1),
+                           ("69AOO inch", 69.4), ("89A90 inch", 89.49), ("33A00 inch", 33.4),
+                           ("189AOO inch", 189.4)]:
+            self.assertEqual(inch_values([text]), [want], text)
+        # A token that still isn't a number is unreadable, never its tail
+        # (2026-10-19 13:25: "183A00" gave 0.0 from the "00").
+        self.assertEqual(inch_values(["18X.400 inch"]), [])
+        self.assertEqual(inch_values(["DOLPHINS 97", "LOGO inch"]), [])
         # 2026-10-16 02:44, #48029: "22.500 irch" (a tick through the n) and "260451 inch".
         self.assertEqual(size_from_ocr(["22.500 irch"], ["260451 inch"], 23), (22.5, 260.451))
 
@@ -100,6 +110,46 @@ class Geometry(unittest.TestCase):
 
     def test_no_pink_no_line(self):
         self.assertIsNone(length_line(Image.new("RGB", (100, 100), DARK)))
+
+
+class Zooms(unittest.TestCase):
+    """read_preview_size tries the next zoom only when a reading doesn't pass."""
+
+    def run_with(self, by_scale, accept=None):
+        import ripauto.ocr as o
+        saved = o.ocr_lines
+        calls = []
+
+        def fake(path):
+            scale = 3 if "-x" not in Path(path).name else int(Path(path).name.split("-x")[1][0])
+            calls.append(scale)
+            across, sideways = by_scale[scale]
+            return across if "across" in Path(path).name else sideways
+        o.ocr_lines = fake
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                size, seen = read_preview_size(fake_preview("22.500 inch", "183.400 inch"), tmp, "t",
+                                               23, scales=(3, 4, 5), accept=accept)
+        finally:
+            o.ocr_lines = saved
+        return size, seen, sorted(set(calls))
+
+    def test_first_good_reading_stops(self):
+        size, seen, scales = self.run_with({3: (["22.500 inch"], ["183.400 inch"])})
+        self.assertEqual((size, scales, len(seen["tries"])), ((22.5, 183.4), [3], 1))
+
+    def test_unreadable_then_clean_at_next_zoom(self):
+        size, seen, scales = self.run_with({3: (["22.500 inch"], ["18X.400 inch"]),
+                                            4: (["22.500 inch"], ["183.400 inch"])})
+        self.assertEqual((size, scales), ((22.5, 183.4), [3, 4]))
+
+    def test_off_plan_reading_is_checked_at_other_zooms_then_kept(self):
+        # A genuinely short preview reads short at every zoom: the first reading
+        # is returned so the gate can say why.
+        short = (["22.500 inch"], ["24.020 inch"])
+        size, seen, scales = self.run_with({3: short, 4: short, 5: short},
+                                           accept=lambda s: abs(s[1] - 183.4) < 3)
+        self.assertEqual((size, scales, len(seen["tries"])), ((22.5, 24.02), [3, 4, 5], 3))
 
 
 @unittest.skipUnless(sys.platform == "win32" and ARIAL.exists() and shutil.which("powershell"),

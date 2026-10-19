@@ -34,19 +34,30 @@ STRIP = 14           # half-height of a label strip, in captured pixels
 MIN_SEGMENT = 8      # pink pixels in a row that count as the length line itself
 BACKGROUND = (45, 45, 45)
 
-_INCH = re.compile(r"(\d+(?:[.,]\d+)?)\s*i[nr]ch", re.I)   # "irch" seen 2026-10-16 02:44
+# The whole token before "inch": a digit, then digits, OCR look-alikes and
+# stray spaces ("183 AOO inch"). "irch": 2026-10-16 02:44.
+_INCH = re.compile(r"(?<![\w.])(\d[\dOoA.,]*(?: [\dOoA.,]+)*) ?i[nr]ch", re.I)
+# Windows OCR misreads in PO-TRY's label font (all 41 saved previews,
+# 2026-10-15..19): "4" as "A" ("183A00", "89A90"), "0" as "O" ("48.1 OO").
+_LOOKALIKES = str.maketrans({"A": "4", "a": "4", "O": "0", "o": "0", ",": ".", " ": None})
+_NUMBER = re.compile(r"\d+(?:\.\d+)?")
 
 
 # ---------------- parsing ----------------
 
 def inch_values(lines):
-    """Every 'N inch' number in OCR lines. A comma is read as the decimal
-    point, and a 4+ digit number with no point gets one before its last three
-    digits (PO-TRY always shows three decimals)."""
+    """Every 'N inch' number in OCR lines. Look-alike letters are mapped back
+    to digits, a comma is the decimal point, and a 4+ digit number with no
+    point gets one before its last three digits (PO-TRY always shows three
+    decimals). A token that still isn't a number is skipped, so it counts as
+    unreadable rather than as part of a number (2026-10-19: "183A00" once
+    gave 0.0 from its last two digits)."""
     out = []
     for line in lines:
         for m in _INCH.finditer(line):
-            text = m.group(1).replace(",", ".")
+            text = m.group(1).translate(_LOOKALIKES)
+            if not _NUMBER.fullmatch(text):
+                continue
             if "." not in text and len(text) >= 4:
                 text = text[:-3] + "." + text[-3:]
             out.append(float(text))
@@ -126,7 +137,7 @@ def _fill(src, xx, yy, w, h, reach=3):
     return BACKGROUND
 
 
-def clean(image):
+def clean(image, scale=SCALE):
     """Paint pink out, then scale up for OCR.
 
     On a very long sheet the preview draws the sheet narrower than its own
@@ -141,10 +152,10 @@ def clean(image):
         for xx in range(img.width):
             if is_pink(src[xx, yy]):
                 px[xx, yy] = _fill(src, xx, yy, img.width, img.height)
-    return img.resize((img.width * SCALE, img.height * SCALE), Image.LANCZOS)
+    return img.resize((img.width * scale, img.height * scale), Image.LANCZOS)
 
 
-def label_strips(image):
+def label_strips(image, scale=SCALE):
     """(width strip, length strip turned upright), or None without the pink lines."""
     found = length_line(image)
     if found is None:
@@ -155,7 +166,7 @@ def label_strips(image):
     w, h = image.size
     across = image.crop((0, 0, w, sheet_top))
     sideways = image.crop((max(0, x - STRIP), sheet_top, min(w, x + STRIP), h))
-    return clean(across), clean(sideways).rotate(90, expand=True)
+    return clean(across, scale), clean(sideways, scale).rotate(90, expand=True)
 
 
 # ---------------- OCR ----------------
@@ -174,26 +185,40 @@ def ocr_lines(image_path):
     return [line.strip() for line in out.stdout.splitlines() if line.strip()]
 
 
-def read_preview_size(image, workdir, stem, max_width_in=None):
-    """OCR a captured preview image. Saves the capture and the two OCR inputs
-    in workdir ({stem}-capture/-across/-sideways.png) for checking later.
-    Returns ((width, length) or None, {"how", "across", "sideways"})."""
+def read_preview_size(image, workdir, stem, max_width_in=None, scales=(SCALE,), accept=None):
+    """OCR a captured preview image. Saves the capture and the OCR inputs in
+    workdir ({stem}-capture/-across/-sideways.png, "-x4" etc. for later zooms)
+    for checking later.
+
+    Tries each zoom in `scales` until a reading passes accept(size) (default:
+    any reading at all); a misread at one zoom is often clean at another
+    (2026-10-19: "183A00" at x3, "183.400" at x5). Returns the first passing
+    reading, else the first reading, else None, with
+    {"how", "across", "sideways", "tries"}; across/sideways are the last OCR."""
     workdir = Path(workdir)
     workdir.mkdir(parents=True, exist_ok=True)
     image = image.convert("RGB")
     image.save(workdir / f"{stem}-capture.png")
-    strips = label_strips(image)
-    if strips is not None:
-        how, (across_img, sideways_img) = "label strips", strips
-    else:
-        big = image.resize((image.width * SCALE, image.height * SCALE), Image.LANCZOS)
-        how, across_img, sideways_img = "whole image", big, big.rotate(90, expand=True)
-    across_path = workdir / f"{stem}-across.png"
-    sideways_path = workdir / f"{stem}-sideways.png"
-    across_img.save(across_path)
-    sideways_img.save(sideways_path)
-    across, sideways = ocr_lines(across_path), ocr_lines(sideways_path)
-    seen = {"how": how, "across": across, "sideways": sideways}
-    if across is None or sideways is None:
-        return None, seen
-    return size_from_ocr(across, sideways, max_width_in), seen
+    accept = accept or (lambda size: True)
+    first, tries, seen = None, [], {}
+    for scale in scales:
+        strips = label_strips(image, scale)
+        if strips is not None:
+            how, (across_img, sideways_img) = "label strips", strips
+        else:
+            big = image.resize((image.width * scale, image.height * scale), Image.LANCZOS)
+            how, across_img, sideways_img = "whole image", big, big.rotate(90, expand=True)
+        tag = "" if scale == scales[0] else f"-x{scale}"
+        across_path = workdir / f"{stem}{tag}-across.png"
+        sideways_path = workdir / f"{stem}{tag}-sideways.png"
+        across_img.save(across_path)
+        sideways_img.save(sideways_path)
+        across, sideways = ocr_lines(across_path), ocr_lines(sideways_path)
+        size = (size_from_ocr(across, sideways, max_width_in)
+                if across is not None and sideways is not None else None)
+        tries.append({"scale": scale, "across": across, "sideways": sideways, "size": size})
+        seen = {"how": how, "across": across, "sideways": sideways, "tries": tries}
+        if size is not None and accept(size):
+            return size, seen
+        first = first or size
+    return first, seen

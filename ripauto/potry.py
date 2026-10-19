@@ -1003,17 +1003,25 @@ def capture_preview(preview):
             return None
 
 
-def read_preview(preview, job, max_width_in):
-    """(width, length) read off the preview by OCR, or None (SPEC §7 step 6)."""
+OCR_SCALES = (3, 4, 5)        # later zooms only when the first reading is unreadable or off-plan
+
+
+def read_preview(preview, job, max_width_in, accept=None):
+    """(width, length) read off the preview by OCR, or None (SPEC §7 step 6).
+    accept(size): does this reading pass the gate? If not, OCR again at the
+    next zoom before believing it."""
     from .ocr import read_preview_size
     image = capture_preview(preview)
     if image is None:
         log("  couldn't capture the preview's drawing area")
         return None
     stem = f"{datetime.now():%Y%m%d-%H%M%S}-{job[:40]}"
-    size, seen = read_preview_size(image, PREVIEW_DIR, stem, max_width_in)
-    if size is None:
-        log(f"  OCR across: {seen['across']}   sideways: {seen['sideways']}")
+    size, seen = read_preview_size(image, PREVIEW_DIR, stem, max_width_in,
+                                   scales=OCR_SCALES, accept=accept)
+    tries = seen.get("tries", [])
+    if len(tries) > 1 or size is None:
+        for t in tries:
+            log(f"  OCR x{t['scale']}  across: {t['across']}   sideways: {t['sideways']}   -> {t['size']}")
     return size
 
 
@@ -1078,8 +1086,11 @@ def rip_pictures(main, pid, pictures, cfg, planned_in, dry_run,
             if not (print_btn and cancel_btn):
                 raise Stop("the preview's Print/Cancel buttons couldn't be confirmed")
 
-            size = read_preview(preview, job, cfg.get("max_width_in"))
-            gate = gate_reason(size, cfg["cap_in"], planned_in, len(pictures), cfg.get("gap_in", 0))
+            gate_for = lambda s: gate_reason(s, cfg["cap_in"], planned_in, len(pictures),
+                                             cfg.get("gap_in", 0))
+            size = read_preview(preview, job, cfg.get("max_width_in"),
+                                accept=lambda s: gate_for(s) is None)
+            gate = gate_for(size)
             log(f"  preview size: {size}   planned {planned_in:.1f} in   gate: {gate or 'ok'}")
             if not short_of_planned(gate) or attempt == LOAD_RETRIES:
                 break

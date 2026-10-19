@@ -150,6 +150,7 @@ class Gate:
             return False
         if action == "now":
             self.go, self.deadline = True, now + 3            # 3 s to let go of the mouse
+            self.log("Rip now pressed in the rip warning; starting in 3 s.")
         if not rip_now and not self.go and now < self.snoozed_until:
             return False
         if self.deadline is None:

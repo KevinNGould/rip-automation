@@ -4,7 +4,14 @@ Claude Code rewrites this file at the end of every working session and pushes it
 
 **Last updated:** 2026-10-15 ~14:30 (printer PC clock) · **HEAD:** see `git log -1`
 
-## Latest (10-16 08:31): OCR fix LIVE; #48029 ripped (260.451 in)
+## Latest (10-19 13:50): 4 days unattended: 27 ripped, 3 cancelled by OCR misreads (fixed, not live)
+
+- **Agent is PAUSED** (Kevin, from the rip warning, 13:28:25). #48263 and #48266 are queued. #48134 has been **held** since 10-16 20:19 (needs Kevin's call: probably done by hand).
+- The 3 cancels were OCR reading "4" as "A" and "0" as "O" ("183A00", "48.1 OO"). The fix maps them back and tries a second zoom when in doubt. All 41 saved previews replay correctly. Details: DECISIONS.md, top entry.
+- Also seen: 2 hands-off stops at 13:26 and 13:28 (Kevin at the PC, guard working). 4 "not a PNG (yet)" download retries that recovered. 9 dashboard heartbeat timeouts that carried on.
+- **To go live:** Restart agent, then Resume.
+
+## Earlier (10-16 08:31): OCR fix LIVE; #48029 ripped (260.451 in)
 
 - 08:26: agent stopped, `ledger --requeue 48029`, started again (pid 9292, pause off) on the OCR fix and the tolerant download cleanup.
 - 08:27 warning → 08:29 preview read **22.5 × 260.451** (gate ok) → ripped 08:30 → tab closed. Nothing is held.

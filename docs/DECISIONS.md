@@ -2,6 +2,19 @@
 
 Newest first. Claude (chat) keeps this file; Claude Code adds entries when it decides something during the build. Build progress and next steps are in `docs/STATUS.md`.
 
+## 2026-10-19
+
+**Built (Code, 13:50): OCR maps look-alike letters, and a doubtful reading gets a second zoom**
+- **Four days unattended (10-16 08:31 → 10-19 13:28):** 27 runs ripped. The length check cancelled 3, all on misread length labels; none was a real size problem:
+  - 10-16 20:19, #48134: "48.1 OO inch" → unreadable (held since).
+  - 10-19 13:25 and 13:27, #48263 + #48266: "183A00 inch" → the parser took the trailing "00" as **0.0 in** → "short" → retry → stopped by the hands-off guard (Kevin was at the PC).
+- Re-OCR of all 41 saved previews at zooms ×2–×5 shows Windows OCR reads PO-TRY's label font with "4" as "A" and "0" as "O", sometimes with a stray space or a lost decimal point. It varies by zoom: "183A00" at ×3, "183400" at ×4, "183.400" at ×5.
+- **Parser (`ocr.inch_values`):** takes the whole token before "inch" and maps A→4 and O→0 (plus the comma as a point, and stray spaces). If the result still isn't a number, it's skipped and so counts as unreadable; it never uses part of a token. The lost-decimal rule is unchanged.
+- **Zooms (`read_preview_size(scales, accept)`):** OCR at ×3 first. Only if that reading is unreadable or fails the gate, try ×4 and then ×5. It uses the first reading that passes the gate; if none passes, it keeps the first reading so the gate reports why. A genuinely wrong preview reads wrong at every zoom, so this can't talk the gate into a bad rip. It just costs about 4 s more when a run is cancelled. Every zoom tried is logged.
+- **Replay:** all 41 saved previews now read right at ×3, including the 3 failures. Tests: 216 pass.
+- **Logging:** the corner popup's **Rip now** button now logs "Rip now pressed in the rip warning" (13:26:52's quick restart was that button, but the log didn't say so).
+- **Download "not a PNG (yet)"** happened 4 times (12:43, 13:14, 18:42, 13:20). Each retry 2 min later worked. Working as intended.
+
 ## 2026-10-16
 
 **Built (Code, 08:30): OCR keeps letters whole where a pink tick crosses the width label**
