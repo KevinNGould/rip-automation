@@ -2,6 +2,12 @@
 
 Newest first. Claude (chat) keeps this file; Claude Code adds entries when it decides something during the build. Build progress and next steps are in `docs/STATUS.md`.
 
+## 2026-10-20
+
+**Noted (Kevin): the colour template is now always `Template_impro`**
+- It's set in PO-TRY's job panel (the dropdown above "Color mode - Follow the picture"). No code change: the agent never reads or touches the template dropdown or anything in that panel. It rips with whatever the new job shows. Checked by `git grep` of ripauto/, tools/ and docs/.
+- **Open (for chat):** if a new job ever came up on a different template, the agent would rip with it. A read-only check (read the dropdown's text before RIP; cancel and hold if it isn't `Template_impro`) would catch that without adding any clicks. Not built; offered to Kevin.
+
 ## 2026-10-19
 
 **Built (Code, 13:50): OCR maps look-alike letters, and a doubtful reading gets a second zoom**
