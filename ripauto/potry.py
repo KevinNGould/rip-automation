@@ -1283,6 +1283,18 @@ def main():
 
     if args.read_template:
         required = cfg.get("required_template")
+        try:
+            import ctypes
+            minimized = bool(ctypes.windll.user32.IsIconic(main_win.handle))
+        except Exception:
+            minimized = "?"
+        everything = main_win.descendants()
+        print(f"Window: {main_win.window_text()!r}  class={main_win.element_info.class_name}  "
+              f"rect={main_win.rectangle()}  minimized={minimized}  controls={len(everything)}")
+        kinds = {}
+        for c in everything:
+            kinds[c.element_info.control_type] = kinds.get(c.element_info.control_type, 0) + 1
+        print("Control types: " + ", ".join(f"{k}={v}" for k, v in sorted(kinds.items())))
         print(f"View: {'job layout' if layout_toolbar(main_win) is not None else 'RIP queue (or unknown)'}")
         print("Job tabs: " + ", ".join(job_tab_names(main_win) or ["none"]))
         all_panels = main_win.descendants(class_name="SettingsWidget")
