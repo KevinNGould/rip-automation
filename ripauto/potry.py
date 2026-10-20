@@ -1283,7 +1283,23 @@ def main():
 
     if args.read_template:
         required = cfg.get("required_template")
-        panels = [p for p in main_win.descendants(class_name="SettingsWidget") if visible(p)]
+        print(f"View: {'job layout' if layout_toolbar(main_win) is not None else 'RIP queue (or unknown)'}")
+        print("Job tabs: " + ", ".join(job_tab_names(main_win) or ["none"]))
+        all_panels = main_win.descendants(class_name="SettingsWidget")
+        for p in all_panels:
+            try:
+                print(f"  SettingsWidget at {p.rectangle()}  visible={visible(p)}")
+            except Exception as e:
+                print(f"  SettingsWidget ({type(e).__name__})")
+        combos = [c for c in main_win.descendants(control_type="ComboBox") if visible(c)]
+        print(f"Visible dropdowns anywhere in PO-TRY: {len(combos)}")
+        for c in combos:
+            try:
+                parent = c.parent().element_info.class_name
+            except Exception:
+                parent = "?"
+            print(f"  dropdown at {c.rectangle()}  in {parent}  text={combo_text(c)!r}")
+        panels = [p for p in all_panels if visible(p)]
         print(f"Visible settings panels: {len(panels)}")
         for panel in panels:
             for combo in panel.descendants(control_type="ComboBox"):
