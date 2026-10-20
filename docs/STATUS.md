@@ -4,7 +4,14 @@ Claude Code rewrites this file at the end of every working session and pushes it
 
 **Last updated:** 2026-10-15 ~14:30 (printer PC clock) · **HEAD:** see `git log -1`
 
-## Latest (10-19 13:55): OCR fix LIVE; queue clear
+## Latest (10-20 13:45): colour-template check built, not live
+
+- Kevin: jobs must always be on colour template `Template_impro`. The agent never touched it. **Built:** a read-only check before RIP that holds the run if the template is anything else or unreadable (DECISIONS.md, 10-20). 221 tests pass.
+- **To go live:** Kevin runs `python -m ripauto.potry --read-template` in an admin prompt with a job tab open, and pastes the output. If it reads `'Template_impro'` → Restart agent. If not → Code adjusts the read first.
+- Ignore 4 lines in `state/agent.log` at 13:37:30 ("job a", "Job50"). A unit test wrote them (Code's slip, now fixed).
+- The live agent (pre-check code) is running normally. 13:37 warning for #48373.
+
+## Earlier (10-19 13:55): OCR fix LIVE; queue clear
 
 - 13:42: restarted on the OCR fix and resumed. #48134 was re-queued per Kevin.
 - The hand check found #48134 and #48266 already in PO-TRY's queue, both ripped by hand, so they're marked `by_hand`. The agent ripped #48263 (25.2 in, gate ok). Nothing is queued or held.

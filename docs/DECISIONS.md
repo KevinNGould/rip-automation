@@ -6,7 +6,14 @@ Newest first. Claude (chat) keeps this file; Claude Code adds entries when it de
 
 **Noted (Kevin): the colour template is now always `Template_impro`**
 - It's set in PO-TRY's job panel (the dropdown above "Color mode - Follow the picture"). No code change: the agent never reads or touches the template dropdown or anything in that panel. It rips with whatever the new job shows. Checked by `git grep` of ripauto/, tools/ and docs/.
-- **Open (for chat):** if a new job ever came up on a different template, the agent would rip with it. A read-only check (read the dropdown's text before RIP; cancel and hold if it isn't `Template_impro`) would catch that without adding any clicks. Not built; offered to Kevin.
+- ~~Open: a read-only template check~~ **Built (Kevin asked, 13:40):**
+  - After the pictures load and before F3/RIP, `read_template()` reads the dropdown. That's the `QComboBox` in the job's `SettingsWidget`, found in the 10-15 control dump.
+  - The read uses the Value pattern, then Selection, then Legacy value, then window text. It never calls `texts()` or `expand()`, which would open the list.
+  - If the template isn't `required_template` (machine.json, default `Template_impro`, case-insensitive), or can't be read: RIP is never pressed. The guard is disarmed, the job's tab is closed, and the sheets are held as "template check: …". The log says "cancelled before RIP".
+  - Every run logs `template: '…' ok`.
+  - Set `"required_template": null` in machine.json to switch the check off.
+  - Before going live, Kevin runs `python -m ripauto.potry --read-template` (admin prompt, with a job tab open). It reads only, and prints every way of reading the dropdown, so we know the read works before it can hold a run.
+- **Code's slip (13:37):** a new unit test called `rip_pictures`, whose `log()` writes to the live `state/agent.log`. 4 fake lines went in at 13:37:30 ("job a", "Job50", "template: 'Color correction mode' STOP"). Nothing touched PO-TRY or the ledger. The test now logs to a temp file; the 4 lines are left in place and should be ignored.
 
 ## 2026-10-19
 

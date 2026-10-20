@@ -66,6 +66,61 @@ class Gate(unittest.TestCase):
         self.assertIsNone(gate_reason((22.5, 67.5), 650, 65.197))   # within 3 in
 
 
+class Template(unittest.TestCase):
+    def test_reason(self):
+        from ripauto.potry import template_reason
+        self.assertIsNone(template_reason("Template_impro", "Template_impro"))
+        self.assertIsNone(template_reason(" template_impro ", "Template_impro"))
+        self.assertIsNone(template_reason("anything", None))              # check switched off
+        self.assertIn("not 'Template_impro'", template_reason("Color correction mode", "Template_impro"))
+        self.assertIn("couldn't read", template_reason(None, "Template_impro"))
+
+    def test_combo_text_never_opens_the_list(self):
+        from ripauto.potry import combo_text
+
+        class Combo:
+            opened = False
+            iface_value = type("V", (), {"CurrentValue": ""})()
+
+            def selected_text(self): return "Template_impro"
+            def legacy_properties(self): return {}
+            def window_text(self): return ""
+            def texts(self): Combo.opened = True; return []
+            def expand(self): Combo.opened = True
+
+        self.assertEqual(combo_text(Combo()), "Template_impro")
+        self.assertFalse(Combo.opened)
+
+    def test_wrong_template_backs_out_before_rip(self):
+        import ripauto.potry as p
+        calls = []
+        saved = {n: getattr(p, n) for n in ("show_layout", "close_agent_tabs", "new_job", "remember_tab",
+                                            "add_picture", "read_template", "intelligent_layout", "press")}
+        p.show_layout = lambda main: None
+        p.close_agent_tabs = lambda main, pid, keep=(): calls.append("close")
+        p.new_job = lambda main: "Job50"
+        p.remember_tab = lambda pid, tab: None
+        p.add_picture = lambda main, pid, path, meter=None: None
+        p.read_template = lambda main: "Color correction mode"
+        p.intelligent_layout = lambda main: calls.append("F3")
+        p.press = lambda ctrl, opens_dialog=False: calls.append("press")
+        tmp = tempfile.TemporaryDirectory()
+        saved["LOG_PATH"] = p.LOG_PATH
+        p.LOG_PATH = Path(tmp.name) / "agent.log"      # never the live log (2026-10-20 13:37 slip)
+        self.addCleanup(tmp.cleanup)
+        try:
+            r = p.rip_pictures(None, 0, [Path("a.png")], {"cap_in": 650, "required_template": "Template_impro"},
+                               10.0, dry_run=False, pause_at=("no-guard",))
+        finally:
+            for n, f in saved.items():
+                setattr(p, n, f)
+        self.assertEqual(r["check"], "template")
+        self.assertIn("Color correction mode", r["gate"])
+        self.assertNotIn("press", calls)                                # RIP never pressed
+        self.assertNotIn("F3", calls)
+        self.assertEqual(calls.count("close"), 2)                      # old tabs, then this job's
+
+
 class AgentTabs(unittest.TestCase):
     def setUp(self):
         import ripauto.potry as p

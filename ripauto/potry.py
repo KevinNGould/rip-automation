@@ -19,6 +19,7 @@ This command only inspects and dry-runs; real rips go through
 python -m ripauto.agent --once. Run from an ADMINISTRATOR Command Prompt in
 the repo root (PO-TRY runs as admin):
   python -m ripauto.potry --inspect-queue                 read the RIP queue, rip nothing
+  python -m ripauto.potry --read-template                 read the open job's colour template
   python -m ripauto.potry --dry-run --limit 1             one file, Cancel at the preview
   python -m ripauto.potry --dry-run --batch --folder F    every file in F as ONE job
       add --pause-at loaded,preview   to stop there for tools\\probe_potry.py
@@ -224,6 +225,49 @@ def visible(ctrl):
         return ctrl.is_visible() and ctrl.rectangle().width() > 0
     except Exception:
         return False
+
+
+def combo_text(combo):
+    """A dropdown's shown text, read without opening it (never texts() or
+    expand(): those open the list). None if nothing readable."""
+    readers = (lambda: combo.iface_value.CurrentValue,
+               lambda: combo.selected_text(),
+               lambda: combo.legacy_properties().get("Value"),
+               lambda: combo.window_text())
+    for read in readers:
+        try:
+            text = (read() or "").strip()
+        except Exception:
+            continue
+        if text:
+            return text
+    return None
+
+
+def read_template(main):
+    """The colour template shown in the open job's settings panel: the
+    dropdown at its top, beside the save / + / gear buttons (QComboBox in
+    SettingsWidget, tools/potry_controls_loaded.txt). Read-only; None if the
+    panel isn't on screen or the text can't be read."""
+    for panel in main.descendants(class_name="SettingsWidget"):
+        if not visible(panel):
+            continue
+        for combo in panel.descendants(control_type="ComboBox"):
+            if visible(combo):
+                return combo_text(combo)
+    return None
+
+
+def template_reason(shown, required):
+    """None when the job's template is the required one (or no check is set),
+    else why the run must not go ahead."""
+    if not required:
+        return None
+    if shown is None:
+        return f"couldn't read the colour template (needs {required})"
+    if shown.strip().casefold() != required.strip().casefold():
+        return f"colour template is {shown!r}, not {required!r}"
+    return None
 
 
 def name_of(ctrl):
@@ -1074,6 +1118,19 @@ def rip_pictures(main, pid, pictures, cfg, planned_in, dry_run,
         if "loaded" in pause_at:
             pause("all pictures loaded, before F3")
 
+        # Colour template (Kevin, 2026-10-20): read only, before RIP is pressed.
+        # A wrong or unreadable template backs out without ripping; the sheets are held.
+        shown = read_template(main)
+        wrong = template_reason(shown, cfg.get("required_template"))
+        if cfg.get("required_template"):
+            log(f"  template: {shown!r}" + (f"   STOP: {wrong}" if wrong else "   ok"))
+        if wrong:
+            HANDS.disarm()
+            close_agent_tabs(main, pid)
+            return {"job_name": job, "preview": None, "gate": wrong, "check": "template",
+                    "row": None, "started": started.isoformat(timespec="seconds"),
+                    "ended": datetime.now().isoformat(timespec="seconds")}
+
         for attempt in range(LOAD_RETRIES + 1):
             intelligent_layout(main)
             # Mark the time before RIP is pressed, so the queue row's timestamp is
@@ -1197,9 +1254,11 @@ def main():
                     help="with --batch: try adding all files in one Add dialog")
     ap.add_argument("--probe-tab-close", action="store_true",
                     help="open an empty job tab and find a way to close it (pause the agent first)")
+    ap.add_argument("--read-template", action="store_true",
+                    help="read the open job's colour template and exit (reads only; clicks nothing)")
     args = ap.parse_args()
 
-    if not args.inspect_queue and not args.dry_run and not args.probe_tab_close:
+    if not (args.inspect_queue or args.dry_run or args.probe_tab_close or args.read_template):
         sys.exit("This command only dry-runs now. Real rips go through the ledger:\n"
                  "  python -m ripauto.agent --once")
     if args.try_multi_add and not args.batch:
@@ -1220,6 +1279,28 @@ def main():
 
     if args.probe_tab_close:
         probe_tab_close(main_win, pid)
+        return
+
+    if args.read_template:
+        required = cfg.get("required_template")
+        panels = [p for p in main_win.descendants(class_name="SettingsWidget") if visible(p)]
+        print(f"Visible settings panels: {len(panels)}")
+        for panel in panels:
+            for combo in panel.descendants(control_type="ComboBox"):
+                print(f"  dropdown at {combo.rectangle()}  visible={visible(combo)}")
+                for label, read in (("value", lambda: combo.iface_value.CurrentValue),
+                                    ("selected", lambda: combo.selected_text()),
+                                    ("legacy", lambda: combo.legacy_properties().get("Value")),
+                                    ("window_text", lambda: combo.window_text())):
+                    try:
+                        print(f"    {label:12} {read()!r}")
+                    except Exception as e:
+                        print(f"    {label:12} ({type(e).__name__})")
+        shown = read_template(main_win)
+        print(f"Template read: {shown!r}   required: {required!r}   "
+              f"-> {template_reason(shown, required) or 'ok'}")
+        if not panels:
+            print("No settings panel on screen: open a job tab (not the RIP queue view) and run this again.")
         return
 
     if args.inspect_queue:

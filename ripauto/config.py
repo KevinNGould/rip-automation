@@ -36,6 +36,7 @@ MACHINE_DEFAULTS = {
     "start_from_order": None,  # go-live floor (SPEC §4); fetch --download refuses without it
     "multi_add": True,         # one Add dialog for many files; proven 2026-10-15
     "warn_before_rip_s": 60,   # corner popup "Auto rip in 60 s" before each run
+    "required_template": "Template_impro",   # colour template a job must show before RIP (Kevin, 2026-10-20); null = no check
     "still_before_rip_s": 5,   # at zero, wait until mouse/keyboard have been still this long
     "snooze_min": 5,           # the popup's "Wait 5 min"
     "warning_corner": "bottom-right",   # top-left | top-right | bottom-left | bottom-right

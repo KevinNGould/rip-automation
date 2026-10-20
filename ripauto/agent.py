@@ -324,11 +324,12 @@ def cycle(cfg, ledger, driver, now, *, dl_names_fn, runs_dir=RUNS_DIR, save=lamb
             log(f"STOPPED during run {run_id}: {e}")
             break
         if result["gate"]:
-            L.hold(ledger, keys, f"length gate: {result['gate']}", now)
+            template = result.get("check") == "template"
+            L.hold(ledger, keys, f"{'template check' if template else 'length gate'}: {result['gate']}", now)
             write_record(runs_dir, record_for(run_id, cfg, run, pictures, result, "gate", False))
             save()
             stopped(result["gate"], state="holding")
-            log(f"Run {run_id} cancelled at the preview: {result['gate']}")
+            log(f"Run {run_id} cancelled {'before RIP' if template else 'at the preview'}: {result['gate']}")
             break
         L.finish_run(ledger, run_id, run.items, now)
         move_ripped(ledger, run, run_id, cfg["queue_dir"])
