@@ -36,10 +36,12 @@ BACKGROUND = (45, 45, 45)
 
 # The whole token before "inch": a digit, then digits, OCR look-alikes and
 # stray spaces ("183 AOO inch"). "irch": 2026-10-16 02:44.
-_INCH = re.compile(r"(?<![\w.])(\d[\dOoA.,]*(?: [\dOoA.,]+)*) ?i[nr]ch", re.I)
-# Windows OCR misreads in PO-TRY's label font (all 41 saved previews,
-# 2026-10-15..19): "4" as "A" ("183A00", "89A90"), "0" as "O" ("48.1 OO").
-_LOOKALIKES = str.maketrans({"A": "4", "a": "4", "O": "0", "o": "0", ",": ".", " ": None})
+_INCH = re.compile(r"(?<![\w.])(\d[\dOoASIl|.,]*(?: [\dOoASIl|.,]+)*) ?i[nr]ch", re.I)
+# Windows OCR misreads in PO-TRY's label font (all 158 saved previews,
+# 2026-10-15..11-02): "4" as "A" ("183A00", "89A90"), "0" as "O" ("48.1 OO"),
+# "5" as "S" ("31 SOO" = 31.500, 5 runs 10-27..11-02), "1" as "I" ("417 AOI").
+_LOOKALIKES = str.maketrans({"A": "4", "a": "4", "O": "0", "o": "0", "S": "5", "s": "5",
+                             "I": "1", "l": "1", "|": "1", ",": ".", " ": None})
 _NUMBER = re.compile(r"\d+(?:\.\d+)?")
 
 

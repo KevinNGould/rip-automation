@@ -2,6 +2,19 @@
 
 Newest first. Claude (chat) keeps this file; Claude Code adds entries when it decides something during the build. Build progress and next steps are in `docs/STATUS.md`.
 
+## 2026-11-02
+
+**Built (Code, Kevin: "build all seven"): fixes from the 10-20 → 11-02 log review (STATUS.md table)**
+1. **OCR:** "S" is read as 5 and "I"/"l"/"|" as 1, along with the existing A→4 and O→0. "31 SOO inch" = 31.500 caused 5 cancels; "417 AOI" was rescued by ×4 on 10-19. Replayed all 158 saved previews: every one now reads at ×3.
+2. **RIP button:** after F3 the agent waits up to 10 s for it (`BUTTON_TIMEOUT`) instead of a single look. 10-27 11:53 failed once.
+3. **Template:** an unreadable template is re-read for up to 10 s (`TEMPLATE_TIMEOUT`) before the run is held. A wrong template still stops at once.
+4. **PO-TRY closed/crashed:** the loop no longer logs "Can't read … skipping this pass" every pass. It says once, at the 3rd miss, and adds "PO-TRY isn't running (closed or crashed?)" when the process is gone. The popup-file write retries for 0.5 s when the popup has it open (the `PermissionError … rip_pending.tmp`).
+5. **Errors:** one `ERROR` line per spell (same type, same step: fetch or cycle), then "Working again after N … error(s)" when that step works again.
+6. **Not-ready downloads:** `NotReady`, logged once per sheet as "not ready yet (the app is still making the file)", not as FAILED. No repeated "Downloading" line on the quiet retries.
+7. **Alive line:** every hour: "Still running: N queued, M held[, paused]".
+
+Tests: 226 pass (10 new).
+
 ## 2026-10-20
 
 **Noted (Kevin): the colour template is now always `Template_impro`**

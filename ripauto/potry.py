@@ -60,6 +60,8 @@ HANDS = HandsOff()            # notices a person using the PC mid-sequence (CRIT
 
 LOAD_TIMEOUT = 300          # picture load
 PREVIEW_TIMEOUT = 120       # Print preview dialog to appear
+BUTTON_TIMEOUT = 10         # a toolbar button to be findable (redraw after F3)
+TEMPLATE_TIMEOUT = 10       # the colour template to be readable
 RIP_TIMEOUT = 45 * 60       # a 50 ft sheet took ~9 min; leave plenty of room
 SETTLE = 2.0                # pause after each UI step
 
@@ -1121,6 +1123,13 @@ def rip_pictures(main, pid, pictures, cfg, planned_in, dry_run,
         # Colour template (Kevin, 2026-10-20): read only, before RIP is pressed.
         # A wrong or unreadable template backs out without ripping; the sheets are held.
         shown = read_template(main)
+        if shown is None and cfg.get("required_template"):
+            # Unreadable for a moment while PO-TRY catches up (2026-10-30 09:24:
+            # the layout values read "?" too). Read again before holding.
+            try:
+                shown = wait_for(lambda: read_template(main), TEMPLATE_TIMEOUT, "the colour template")
+            except Stop:
+                shown = None
         wrong = template_reason(shown, cfg.get("required_template"))
         if cfg.get("required_template"):
             log(f"  template: {shown!r}" + (f"   STOP: {wrong}" if wrong else "   ok"))
@@ -1137,7 +1146,10 @@ def rip_pictures(main, pid, pictures, cfg, planned_in, dry_run,
             # never earlier than this whichever moment PO-TRY stamps it.
             started_ts = time.time() - 5
             started_str = datetime.fromtimestamp(started_ts).strftime("%Y-%m-%d %H:%M:%S")
-            press(tool_button(main, "RIP"), opens_dialog=True)
+            # Right after F3 the toolbar can be redrawing (2026-10-27 11:53: "couldn't
+            # find the 'RIP' button" once); give it a few seconds.
+            press(wait_for(lambda: tool_button(main, "RIP"), BUTTON_TIMEOUT, "the 'RIP' button"),
+                  opens_dialog=True)
             preview = wait_for(lambda: find_preview(main, pid), PREVIEW_TIMEOUT, "the Print preview dialog")
             print_btn, cancel_btn = preview_buttons(preview)
             if not (print_btn and cancel_btn):

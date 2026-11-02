@@ -60,7 +60,10 @@ class Parse(unittest.TestCase):
         # "0" as "O", stray spaces, decimal point lost.
         for text, want in [("183A00 inch", 183.4), ("183 AOO inch", 183.4), ("48.1 OO inch", 48.1),
                            ("69AOO inch", 69.4), ("89A90 inch", 89.49), ("33A00 inch", 33.4),
-                           ("189AOO inch", 189.4)]:
+                           ("189AOO inch", 189.4),
+                           # 10-27..11-02: "5" read as "S", point read as a space.
+                           ("31 SOO inch", 31.5), ("61 SOO inch", 61.5), ("181 SOO inch", 181.5),
+                           ("21 .OOO inch", 21.0), ("417 AOI inch", 417.401)]:
             self.assertEqual(inch_values([text]), [want], text)
         # A token that still isn't a number is unreadable, never its tail
         # (2026-10-19 13:25: "183A00" gave 0.0 from the "00").

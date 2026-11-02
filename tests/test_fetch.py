@@ -100,5 +100,27 @@ class LedgerRecord(unittest.TestCase):
         self.assertNotIn("customer", rec)
 
 
+class NotReadyDownloads(unittest.TestCase):
+    def test_not_ready_is_said_once_per_sheet_not_as_a_failure(self):
+        # 40 "FAILED ... not a PNG (yet)" lines 10-20..11-02; each worked 2 min later.
+        import ripauto.fetch as f
+        saved = f.download
+        f.download = lambda sheet, folder: (_ for _ in ()).throw(f.NotReady("not a PNG (yet)"))
+        f.NOT_READY_SEEN.discard("L1")
+        logs = []
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                cfg = {"queue_dir": d}
+                sheet = {"line_id": "L1", "url": "https://x", "order": "#1"}
+                for _ in range(3):
+                    f.download_new(cfg, {}, [sheet], save=lambda l: None, log=logs.append)
+        finally:
+            f.download = saved
+            f.NOT_READY_SEEN.discard("L1")
+        self.assertEqual(sum("not ready yet" in line for line in logs), 1)
+        self.assertEqual(sum(line.startswith("Downloading") for line in logs), 1)
+        self.assertFalse(any("FAILED" in line for line in logs))
+
+
 if __name__ == "__main__":
     unittest.main()

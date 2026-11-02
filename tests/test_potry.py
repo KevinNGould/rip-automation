@@ -120,6 +120,29 @@ class Template(unittest.TestCase):
         self.assertNotIn("F3", calls)
         self.assertEqual(calls.count("close"), 2)                      # old tabs, then this job's
 
+    def test_unreadable_template_is_read_again_before_holding(self):
+        # 2026-10-30 09:24: unreadable for a moment, then held. Now it reads again.
+        import ripauto.potry as p
+        reads = iter([None, None, "Color correction mode"])
+        saved = {n: getattr(p, n) for n in ("show_layout", "close_agent_tabs", "new_job", "remember_tab",
+                                            "add_picture", "read_template", "LOG_PATH")}
+        p.show_layout = lambda main: None
+        p.close_agent_tabs = lambda main, pid, keep=(): None
+        p.new_job = lambda main: "Job51"
+        p.remember_tab = lambda pid, tab: None
+        p.add_picture = lambda main, pid, path, meter=None: None
+        p.read_template = lambda main: next(reads)
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        p.LOG_PATH = Path(tmp.name) / "agent.log"
+        try:
+            r = p.rip_pictures(None, 0, [Path("a.png")], {"cap_in": 650, "required_template": "Template_impro"},
+                               10.0, dry_run=False, pause_at=("no-guard",))
+        finally:
+            for n, f in saved.items():
+                setattr(p, n, f)
+        self.assertIn("Color correction mode", r["gate"])              # the later read, not "couldn't read"
+
 
 class AgentTabs(unittest.TestCase):
     def setUp(self):

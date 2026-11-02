@@ -4,7 +4,14 @@ Claude Code rewrites this file at the end of every working session and pushes it
 
 **Last updated:** 2026-10-15 ~14:30 (printer PC clock) · **HEAD:** see `git log -1`
 
-## Latest (11-02 12:45): log review, 10-20 → 11-02 (Code, at Kevin's request)
+## Latest (11-02): all seven review fixes built (DECISIONS.md, 11-02); restart when idle
+
+- 226 tests pass. They go live on the next agent restart.
+- **7 sheets still held, Kevin's call:** #48942 #48943 (RIP button, 10-27), #48965 #49117 #49232 #49375 (OCR "S", 10-27…11-02), #49259 (template, 10-30).
+  - Held 3–6 days, so they were probably ripped by hand.
+  - Re-queueing a sheet that was ripped by hand and already cleared from PO-TRY's queue would rip it again, because the hand check can't see it. So they're either marked by-hand or re-queued only on Kevin's word.
+
+## Earlier (11-02 12:45): log review, 10-20 → 11-02 (Code, at Kevin's request)
 
 **103 runs ripped. 5 cancelled at the preview, 1 cancelled before RIP, 1 stopped, 3 interrupted (Kevin at the PC). 7 sheets held.** The template check went live 10-22 and read `Template_impro` on 90 runs.
 

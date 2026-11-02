@@ -37,7 +37,15 @@ def _write_json(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(data), encoding="utf-8")
-    tmp.replace(path)
+    # The popup may be reading the file at that instant; Windows then refuses
+    # the replace (2026-10-21/28/29: "PermissionError … rip_pending.tmp").
+    for attempt in range(10):
+        try:
+            tmp.replace(path)
+            return
+        except PermissionError:
+            time.sleep(0.05)
+    # Still busy: skip this update; the next tick (2-20 s) writes it again.
 
 
 class Warner:

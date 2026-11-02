@@ -117,6 +117,13 @@ def get_token(cfg, secrets):
         raise ShopifyError(f"Could not get a Shopify token (HTTP {e.code}).") from None
 
 
+class NotReady(ValueError):
+    """The app hasn't finished making the sheet's file yet (a non-PNG answer)."""
+
+
+NOT_READY_SEEN = set()        # line items already logged as not ready (once each)
+
+
 class ShopifyError(Exception):
     pass
 
@@ -230,7 +237,7 @@ def download(sheet, folder):
             part.unlink()
         except OSError:
             pass
-        raise ValueError("downloaded file is not a PNG (yet); trying again next fetch")
+        raise NotReady("downloaded file is not a PNG (yet); trying again next fetch")
 
     # Prefer the app's own name if its server sends one and it's for this order.
     stem = None
@@ -279,14 +286,22 @@ def download_new(cfg, ledger, sheets, *, limit=0, save=None, log=print):
     todo = [s for s in sheets if s["line_id"] not in ledger and s["url"]]
     if limit:
         todo = todo[:limit]
-    if todo:
+    if any(s["line_id"] not in NOT_READY_SEEN for s in todo):     # not on quiet retries
         log(f"Downloading {len(todo)} sheet(s) to {folder}")
     added = []
     for s in todo:
         try:
             path = download(s, folder)
         except Exception as e:  # keep going on one bad file
-            log(f"  FAILED {s['order']}: {type(e).__name__}: {e}")
+            if isinstance(e, NotReady):
+                # Normal for a brand-new order (40 times 10-20..11-02, every one
+                # fetched 2 min later): say it once per sheet, not as a failure.
+                if s["line_id"] not in NOT_READY_SEEN:
+                    NOT_READY_SEEN.add(s["line_id"])
+                    log(f"  {s['order']} not ready yet (the app is still making the file); "
+                        f"trying again next fetch")
+            else:
+                log(f"  FAILED {s['order']}: {type(e).__name__}: {e}")
             continue
         rec = ledger_record(s, path)
         ledger[s["line_id"]] = rec

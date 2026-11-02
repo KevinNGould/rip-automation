@@ -71,7 +71,8 @@ class Loop(unittest.TestCase):
             return []
         return f
 
-    def loop(self, driver, max_sleeps, fetcher=None, idle=lambda: 600, on_sleep=None):
+    def loop(self, driver, max_sleeps, fetcher=None, idle=lambda: 600, on_sleep=None,
+             potry_running=lambda: True):
         stop = threading.Event()
         ft = FakeTime(stop, max_sleeps, on_sleep)
         rep = RecordingReporter()
@@ -80,7 +81,8 @@ class Loop(unittest.TestCase):
                  pause_path=self.pause, idle_s=idle, clock=ft.clock, now_fn=lambda: NOW,
                  sleep=ft.sleep, stop=stop, runs_dir=self.runs,
                  warner=Warner(launch=False, pending=self.pending, response=self.response),
-                 rip_now_path=self.rip_now, restart_path=Path(self.tmp.name) / "RESTART")
+                 rip_now_path=self.rip_now, restart_path=Path(self.tmp.name) / "RESTART",
+                 potry_running=potry_running)
         return rep, ft
 
     def press(self, action):
@@ -153,6 +155,37 @@ class Loop(unittest.TestCase):
         self.assertIn("PO-TRY's queue is readable again.", self.logs)
         self.assertEqual(len(d.calls), 1)                           # then ripped normally
         self.assertEqual(L.status(self.ledger["a"]), L.RIPPED)
+
+    def test_unreadable_queue_logs_once_and_says_when_po_try_is_gone(self):
+        # 10-21/28/29: PO-TRY closed; "Can't read" every 9 s, 181 lines.
+        self.add("a", 47950, 600.0)
+        d = FakeDriver()
+        d.rows = None
+        self.loop(d, max_sleeps=60, potry_running=lambda: False)     # past the 60 s warning
+        self.assertFalse(any("skipping this pass" in line for line in self.logs))
+        said = [line for line in self.logs if "times in a row" in line]
+        self.assertEqual(len(said), 1)
+        self.assertIn("PO-TRY isn't running", said[0])
+
+    def test_same_error_is_logged_once_per_spell(self):
+        # 10-29 02:11-03:12, internet down: 29 identical ERROR lines.
+        import urllib.error
+        tries = {"n": 0}
+
+        def fetcher(ledger):
+            tries["n"] += 1
+            if tries["n"] <= 5:
+                raise urllib.error.URLError("getaddrinfo failed")
+            return []
+        self.loop(FakeDriver(), max_sleeps=60, fetcher=fetcher)     # fetches every 2 min
+        self.assertEqual(sum(1 for line in self.logs if line.startswith("ERROR URLError")), 1)
+        self.assertTrue(any(line.startswith("Working again after 5 URLError") for line in self.logs))
+
+    def test_hourly_still_running_line(self):
+        self.loop(FakeDriver(), max_sleeps=400)              # 400 x 20 s > 2 h
+        alive = [line for line in self.logs if line.startswith("Still running:")]
+        self.assertEqual(len(alive), 2)
+        self.assertEqual(alive[0], "Still running: 0 queued, 0 held.")
 
     def test_interrupted_run_retries_after_5_min_with_a_note(self):
         self.add("a", 47950, 600.0)

@@ -62,12 +62,22 @@ UNREADABLE = "can't read PO-TRY's queue or Downloads"
 UNREADABLE_ERROR_AFTER = 3
 INTERRUPTED = "interrupted by someone using the PC"
 RETRY_AFTER_INTERRUPT_S = 300
+ALIVE_EVERY_S = 3600          # "Still running" line in the log
 RESTART_PATH = STATE_DIR / "RESTART"     # RIP Agent window "Restart agent" (picks up new code)
 TASK_NAME = "OSS RIP Agent"
 
 
 class Stop(Exception):
     pass
+
+
+def potry_is_running():
+    """True/False from the process list, None if it can't be told."""
+    try:
+        from .potry import find_pid
+        return find_pid() is not None
+    except Exception:
+        return None
 
 
 # ---------------- run records ----------------
@@ -252,7 +262,8 @@ def cycle(cfg, ledger, driver, now, *, dl_names_fn, runs_dir=RUNS_DIR, save=lamb
         # Machine-level trouble, not a problem with any sheet (CRITIQUE B3):
         # touch nothing this pass; the loop flags an error after 3 in a row.
         what = "PO-TRY's RIP queue" if rows is None else "the Downloads folder"
-        log(f"Can't read {what}; skipping this pass.")
+        if not quiet:            # the loop says it once, not every pass (181 lines, 10-21..29)
+            log(f"Can't read {what}; skipping this pass.")
         return done(UNREADABLE)
     if ripping_now(rows):
         log("PO-TRY is still ripping a job; waiting.")
@@ -434,7 +445,7 @@ def make_fetcher(cfg, secrets, log):
 def run_loop(cfg, ledger, driver, *, fetcher, dl_names_fn, reporter, save, log,
              pause_path=PAUSE_PATH, idle_s=seconds_since_input, clock=time.time,
              now_fn=datetime.now, sleep=time.sleep, stop=None, runs_dir=RUNS_DIR,
-             warner=None, rip_now_path=RIP_NOW_PATH, restart_path=None):
+             warner=None, rip_now_path=RIP_NOW_PATH, restart_path=None, potry_running=None):
     """Fetch every fetch_every_min, cycle every LOOP_EVERY_S, until stop is set.
 
     Before a ready run starts, a corner popup warns "Auto rip in 60 s" (Gate in
@@ -459,11 +470,22 @@ def run_loop(cfg, ledger, driver, *, fetcher, dl_names_fn, reporter, save, log,
     paused = False
     last_wait = None
     unreadable = 0
+    potry_running = potry_running or potry_is_running
+    error_kind, error_count, error_last = None, 0, ""   # one line per spell of the same error
+    error_step = None                                    # "fetch" or "cycle": the spell ends when it works
+    last_alive = clock()
     log(f"Agent loop started (fetch every {fetch_every // 60} min, cycle every {LOOP_EVERY_S} s, "
         f"{gate.warn_s} s corner warning before each run).")
     reporter.update(state="idle")
 
     while not stop.is_set():
+        if clock() - last_alive >= ALIVE_EVERY_S:
+            # So a silent log still shows when the agent was last alive
+            # (10-24 08:23 -> 10-26 08:21 left no trace of when it stopped).
+            last_alive = clock()
+            held = sum(1 for r in ledger.values() if L.status(r) == L.HELD)
+            log(f"Still running: {len(L.queued_sheets(ledger))} queued, {held} held"
+                f"{', paused' if paused else ''}.")
         if restart_path.exists() and not gate.active:
             # Safe point: between cycles, no countdown. Stop here;
             # main() then relaunches the scheduled task with any new code.
@@ -495,13 +517,17 @@ def run_loop(cfg, ledger, driver, *, fetcher, dl_names_fn, reporter, save, log,
             reporter.update(state="idle")
             paused, last_fetch = False, None
 
+        fetched = False
+        step = "fetch"
         try:
             if last_fetch is None or clock() - last_fetch >= fetch_every:
                 reporter.update(state="fetching")
                 last_fetch = clock()
                 added = fetcher(ledger)
+                fetched = True
                 if added:
                     log(f"Fetched {len(added)} new sheet(s).")
+            step = "cycle"
             rip_now = rip_now_path.exists()
             summary = cycle(cfg, ledger, driver, now_fn(), dl_names_fn=dl_names_fn,
                             runs_dir=runs_dir, save=save, log=log, reporter=reporter,
@@ -509,7 +535,10 @@ def run_loop(cfg, ledger, driver, *, fetcher, dl_names_fn, reporter, save, log,
             if summary["waiting"] == UNREADABLE:
                 unreadable += 1
                 if unreadable == UNREADABLE_ERROR_AFTER:
-                    log(f"Couldn't read PO-TRY's queue or Downloads {unreadable} times in a row.")
+                    running = potry_running()
+                    why = (" PO-TRY isn't running (closed or crashed?); it's started again when a run needs it."
+                           if running is False else "")
+                    log(f"Couldn't read PO-TRY's queue or Downloads {unreadable} times in a row.{why}")
                     reporter.update(state="error", current_run=None,
                                     last_error="can't read PO-TRY's RIP queue (or Downloads); nothing is "
                                                "being ripped until it can")
@@ -541,8 +570,16 @@ def run_loop(cfg, ledger, driver, *, fetcher, dl_names_fn, reporter, save, log,
             last_wait = summary["waiting"]
             if summary["stopped"]:
                 log(f"Run stopped: {summary['stopped']}. Those sheets are held; carrying on.")
+            if error_kind and (error_step == "cycle" or fetched):
+                log(f"Working again after {error_count} {error_kind} error(s) (last: {error_last}).")
+                error_kind, error_count, error_step = None, 0, None
         except Exception as e:                     # never let one bad cycle end the agent
-            log(f"ERROR {type(e).__name__}: {e}")
+            kind = type(e).__name__
+            if (kind, step) != (error_kind, error_step):
+                # Once per spell: an internet outage gave 29 identical lines on 10-29.
+                log(f"ERROR {kind}: {e}" + ("  (repeats are counted, not logged)" if kind == "URLError" else ""))
+                error_kind, error_count, error_step = kind, 0, step
+            error_count, error_last = error_count + 1, str(e)[:120]
             reporter.update(state="error", current_run=None,
                             last_error=f"{type(e).__name__}: {e}")
             gate.reset()
