@@ -4,12 +4,14 @@ Claude Code rewrites this file at the end of every working session and pushes it
 
 **Last updated:** 2026-10-15 ~14:30 (printer PC clock) · **HEAD:** see `git log -1`
 
-## Latest (11-02): all seven review fixes built (DECISIONS.md, 11-02); restart when idle
+## Latest (11-02 13:05): review fixes + "done by hand" control LIVE; nothing held
 
-- 226 tests pass. They go live on the next agent restart.
-- **7 sheets still held, Kevin's call:** #48942 #48943 (RIP button, 10-27), #48965 #49117 #49232 #49375 (OCR "S", 10-27…11-02), #49259 (template, 10-30).
-  - Held 3–6 days, so they were probably ripped by hand.
-  - Re-queueing a sheet that was ripped by hand and already cleared from PO-TRY's queue would rip it again, because the hand check can't see it. So they're either marked by-hand or re-queued only on Kevin's word.
+- 12:40: the seven log-review fixes went live (DECISIONS.md, 11-02).
+- 13:04: restarted onto the new "Held & queued sheets" control (window + `ledger --by-hand/--requeue`, applied by the running agent). Pause stays off.
+- 13:04:34: per Kevin, the 7 held sheets (#48942 #48943 #48965 #49117 #49232 #49259 #49375) were marked done by hand through the new command, and the running agent applied the request. Nothing is held or queued.
+- Kevin: close and reopen the RIP Agent window to see the new button.
+
+## Earlier (11-02): all seven review fixes built
 
 ## Earlier (11-02 12:45): log review, 10-20 → 11-02 (Code, at Kevin's request)
 
