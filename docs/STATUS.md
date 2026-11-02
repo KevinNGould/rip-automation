@@ -4,7 +4,23 @@ Claude Code rewrites this file at the end of every working session and pushes it
 
 **Last updated:** 2026-10-15 ~14:30 (printer PC clock) · **HEAD:** see `git log -1`
 
-## Latest (10-20 13:45): colour-template check built, not live
+## Latest (11-02 12:45): log review, 10-20 → 11-02 (Code, at Kevin's request)
+
+**103 runs ripped. 5 cancelled at the preview, 1 cancelled before RIP, 1 stopped, 3 interrupted (Kevin at the PC). 7 sheets held.** The template check went live 10-22 and read `Template_impro` on 90 runs.
+
+| # | What | Count | Effect | Proposed fix |
+|---|---|---|---|---|
+| 1 | OCR reads "5" as "S": "31 SOO inch" = 31.500 | 5 runs (10-27, 10-28, 10-30 ×2, 11-02); the ×5 zoom saved one | #48965 #49117 #49232 #49375 held | map S→5 like A→4 / O→0 |
+| 2 | "couldn't find the 'RIP' button" right after F3 | 1 (10-27 11:53) | #48942 #48943 held | wait up to 10 s for the button instead of one look |
+| 3 | template unreadable; the layout values read "?" at the same moment | 1 (10-30 09:24) | #49259 held | re-read for up to 10 s before holding |
+| 4 | PO-TRY closed or crashed: "Can't read PO-TRY's RIP queue" every 9 s for ~6 min, then `PermissionError … rip_pending.tmp` | 10-21 17:23, 10-28 19:58, 10-29 17:44 (181 log lines) | no harm; on 10-21 the agent started PO-TRY itself and ripped | say "PO-TRY isn't running" once, not every pass; retry the popup-file write |
+| 5 | internet down: `URLError` every ~2.5 min | 10-29 02:11–03:12 (29 lines), 10-21 (4) | none | log once when it goes and once when it's back |
+| 6 | "FAILED … not a PNG (yet)" | 40 | none; every one got it 2 min later | call it "not ready yet", once per sheet |
+| 7 | agent silent 10-24 08:23 → 10-26 08:21 (fresh start, 12 sheets waiting) | 1 | weekend orders waited until Monday | no stop line, so the PC was most likely off or asleep; add an hourly "alive" line so the log shows when |
+
+Also: 21 dashboard heartbeat timeouts (harmless).
+
+## Earlier (10-20 13:45): colour-template check built, not live
 
 - Kevin: jobs must always be on colour template `Template_impro`. The agent never touched it. **Built:** a read-only check before RIP that holds the run if the template is anything else or unreadable (DECISIONS.md, 10-20). 221 tests pass.
 - **To go live:** Kevin runs `python -m ripauto.potry --read-template` in an admin prompt with a job tab open, and pastes the output. If it reads `'Template_impro'` → Restart agent. If not → Code adjusts the read first.
