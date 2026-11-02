@@ -208,3 +208,35 @@ def start(resume_first=True):
 def open_log():
     if LOG_PATH.exists():
         os.startfile(str(LOG_PATH))       # Windows: opens in the default text editor
+
+
+# ---------------- held / queued sheets (Kevin, 2026-11-02) ----------------
+
+def sheets_for_a_person(ledger=None):
+    """Held and queued sheets, held first then oldest order first, as rows for
+    the window: {key, order, status, length_in, reason, when}."""
+    from . import ledger as L
+    ledger = L.load() if ledger is None else ledger
+    rows = []
+    for key, rec in ledger.items():
+        st = L.status(rec)
+        if st not in (L.HELD, L.QUEUED):
+            continue
+        rows.append({"key": key, "order": rec.get("order", "?"), "status": st,
+                     "length_in": rec.get("length_in"),
+                     "reason": rec.get("hold_reason") or "",
+                     "when": (rec.get("updated_at") or rec.get("fetched_at") or "")[:16].replace("T", " ")})
+    rows.sort(key=lambda r: (r["status"] != L.HELD, str(r["order"]), r["key"]))
+    return rows
+
+
+def ledger_action(action, keys):
+    """'by_hand' or 'requeue' these sheets. Returns (ok, message)."""
+    from . import ledger as L
+    if not keys:
+        return False, "Pick one or more sheets first."
+    if agent_running():
+        L.request(action, keys)
+        return True, "Sent to the agent; the list updates within about 20 seconds."
+    changed = L.apply_now(action, keys, who="RIP Agent window", log=lambda line: None)
+    return True, f"Done: {changed} sheet(s) changed (the agent is off, so it was applied straight away)."

@@ -82,8 +82,22 @@ class Loop(unittest.TestCase):
                  sleep=ft.sleep, stop=stop, runs_dir=self.runs,
                  warner=Warner(launch=False, pending=self.pending, response=self.response),
                  rip_now_path=self.rip_now, restart_path=Path(self.tmp.name) / "RESTART",
-                 potry_running=potry_running)
+                 potry_running=potry_running, requests_path=self.requests)
         return rep, ft
+
+    @property
+    def requests(self):
+        return Path(self.tmp.name) / "ledger_requests.json"
+
+    def test_window_request_is_applied_even_while_paused(self):
+        self.add("a", 47950, 100.0)
+        self.ledger["a"]["status"] = L.HELD
+        self.pause.write_text("")
+        L.request("by_hand", ["a"], path=self.requests)
+        self.loop(FakeDriver(), max_sleeps=2)
+        self.assertEqual(L.status(self.ledger["a"]), L.BY_HAND)
+        self.assertFalse(self.requests.exists())
+        self.assertIn("RIP Agent window: marked done by hand 1 sheet(s): #47950", self.logs)
 
     def press(self, action):
         """What the popup's buttons do."""

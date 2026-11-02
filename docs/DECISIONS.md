@@ -4,6 +4,12 @@ Newest first. Claude (chat) keeps this file; Claude Code adds entries when it de
 
 ## 2026-11-02
 
+**Built (Code, Kevin: "an option somewhere to mark these orders done when I need"): done-by-hand / re-queue from the window**
+- **RIP Agent window → "Held & queued sheets"**: the button shows the counts and turns amber when anything is held. It opens a list (held first, in yellow). Multi-select, then **Mark done by hand** (held or queued sheets; the agent never rips them) or **Re-queue** (held only, with a warning that a hand-ripped job already cleared from PO-TRY's queue would be ripped again). Both ask for confirmation.
+- **Command line:** `python -m ripauto.ledger --by-hand 48942 48943` and `--requeue …`. They no longer need the agent stopped.
+- **How:** the running agent keeps the ledger in memory, so the window and CLI write `state/ledger_requests.json`. The agent applies it at the top of every loop pass (between cycles, never mid-run, paused or not), saves, and logs e.g. "RIP Agent window: marked done by hand 2 sheet(s): #48942 #48943". With the agent off, the change is applied straight to `processed.json`. Each change checks the sheet's status, so applying one twice is harmless. In-run, ripped and already-by-hand sheets are never touched.
+- Tests: 235 pass (9 new). The window itself wasn't opened by Code (a window appearing mid-run would trip the hands-off guard). Kevin: close and reopen the RIP Agent window to get the button.
+
 **Built (Code, Kevin: "build all seven"): fixes from the 10-20 → 11-02 log review (STATUS.md table)**
 1. **OCR:** "S" is read as 5 and "I"/"l"/"|" as 1, along with the existing A→4 and O→0. "31 SOO inch" = 31.500 caused 5 cancels; "417 AOI" was rescued by ×4 on 10-19. Replayed all 158 saved previews: every one now reads at ×3.
 2. **RIP button:** after F3 the agent waits up to 10 s for it (`BUTTON_TIMEOUT`) instead of a single look. 10-27 11:53 failed once.

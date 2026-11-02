@@ -445,7 +445,8 @@ def make_fetcher(cfg, secrets, log):
 def run_loop(cfg, ledger, driver, *, fetcher, dl_names_fn, reporter, save, log,
              pause_path=PAUSE_PATH, idle_s=seconds_since_input, clock=time.time,
              now_fn=datetime.now, sleep=time.sleep, stop=None, runs_dir=RUNS_DIR,
-             warner=None, rip_now_path=RIP_NOW_PATH, restart_path=None, potry_running=None):
+             warner=None, rip_now_path=RIP_NOW_PATH, restart_path=None, potry_running=None,
+             requests_path=None):
     """Fetch every fetch_every_min, cycle every LOOP_EVERY_S, until stop is set.
 
     Before a ready run starts, a corner popup warns "Auto rip in 60 s" (Gate in
@@ -478,7 +479,15 @@ def run_loop(cfg, ledger, driver, *, fetcher, dl_names_fn, reporter, save, log,
         f"{gate.warn_s} s corner warning before each run).")
     reporter.update(state="idle")
 
+    requests_path = requests_path or L.REQUESTS_PATH
     while not stop.is_set():
+        # "Done by hand" / "Re-queue" from the RIP Agent window or the command
+        # line (Kevin, 2026-11-02). Between cycles, so never mid-run; paused or not.
+        try:
+            if L.apply_requests(ledger, now_fn(), log, requests_path):
+                save()
+        except Exception as e:
+            log(f"Couldn't apply a ledger request: {type(e).__name__}: {e}")
         if clock() - last_alive >= ALIVE_EVERY_S:
             # So a silent log still shows when the agent was last alive
             # (10-24 08:23 -> 10-26 08:21 left no trace of when it stopped).

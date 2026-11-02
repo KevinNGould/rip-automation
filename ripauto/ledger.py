@@ -106,37 +106,149 @@ def mark_by_hand(ledger, key, detail, now=None):
     ledger[key].update(status=BY_HAND, by_hand=detail, updated_at=_stamp(now))
 
 
-def requeue(ledger, orders, now=None):
-    """Held sheets of these order numbers go back to queued (a person checked
-    them). Returns the keys changed; ripped, by-hand and queued sheets are left alone."""
-    want = {str(o).lstrip("#") for o in orders}
+def keys_for_orders(ledger, orders, statuses):
+    """Sheet keys of these order numbers ("#48942" or "48942") in these statuses."""
+    want = {str(o).strip().lstrip("#") for o in orders}
+    return [k for k, rec in ledger.items()
+            if str(rec.get("order", "")).lstrip("#") in want and status(rec) in statuses]
+
+
+def requeue_keys(ledger, keys, now=None):
+    """Held sheets go back to queued (a person checked them). Returns the keys
+    changed; anything not held is left alone."""
     changed = []
-    for key, rec in ledger.items():
-        if str(rec.get("order", "")).lstrip("#") in want and status(rec) == HELD:
-            rec.pop("hold_reason", None)
-            rec.pop("run", None)
-            rec.pop("run_copies", None)
-            rec.update(status=QUEUED, updated_at=_stamp(now))
-            changed.append(key)
+    for key in keys:
+        rec = ledger.get(key)
+        if rec is None or status(rec) != HELD:
+            continue
+        rec.pop("hold_reason", None)
+        rec.pop("run", None)
+        rec.pop("run_copies", None)
+        rec.update(status=QUEUED, updated_at=_stamp(now))
+        changed.append(key)
+    return changed
+
+
+def requeue(ledger, orders, now=None):
+    """Held sheets of these order numbers go back to queued."""
+    return requeue_keys(ledger, keys_for_orders(ledger, orders, (HELD,)), now)
+
+
+def done_by_hand(ledger, keys, detail, now=None):
+    """Held or queued sheets a person ripped (or will rip) themself: by_hand,
+    never planned again. Returns the keys changed; in-run, ripped and
+    already-by-hand sheets are left alone."""
+    changed = []
+    for key in keys:
+        rec = ledger.get(key)
+        if rec is None or status(rec) not in (HELD, QUEUED):
+            continue
+        rec.pop("run_copies", None)
+        mark_by_hand(ledger, key, detail, now)
+        changed.append(key)
+    return changed
+
+
+# ---------------- requests from a person ----------------
+# The running agent keeps the ledger in memory, so the RIP Agent window and
+# the command line can't edit processed.json under it. They drop a request
+# here instead; the agent applies it between cycles (within ~20 s, paused or
+# not). With the agent off, apply_now() does the same straight away.
+
+REQUESTS_PATH = STATE_DIR / "ledger_requests.json"
+ACTIONS = ("by_hand", "requeue")
+
+
+def request(action, keys, who="RIP Agent window", path=REQUESTS_PATH):
+    """Queue a change for the agent: by_hand or requeue these sheet keys."""
+    if action not in ACTIONS:
+        raise ValueError(f"unknown ledger action {action!r}")
+    items = []
+    if path.exists():
+        try:
+            items = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            items = []
+    items.append({"action": action, "keys": list(keys), "who": who, "at": _stamp(None)})
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(items, indent=2), encoding="utf-8")
+    tmp.replace(path)
+
+
+def apply_requests(ledger, now=None, log=print, path=REQUESTS_PATH):
+    """Apply and remove waiting requests. Returns how many sheets changed.
+    Applying one twice is harmless: each change checks the sheet's status."""
+    if not path.exists():
+        return 0
+    grabbed = path.with_suffix(".applying")
+    try:
+        path.replace(grabbed)              # anything written after this waits for the next pass
+        items = json.loads(grabbed.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        log(f"Couldn't read a ledger request ({type(e).__name__}); skipped.")
+        try:
+            grabbed.unlink()
+        except OSError:
+            pass
+        return 0
+    changed = 0
+    for item in items if isinstance(items, list) else []:
+        keys, who = item.get("keys") or [], item.get("who") or "a person"
+        if item.get("action") == "by_hand":
+            done = done_by_hand(ledger, keys, f"marked done by hand ({who})", now)
+            verb = "marked done by hand"
+        elif item.get("action") == "requeue":
+            done = requeue_keys(ledger, keys, now)
+            verb = "re-queued"
+        else:
+            continue
+        if done:
+            orders = " ".join(dict.fromkeys(ledger[k].get("order", "?") for k in done))
+            log(f"{who}: {verb} {len(done)} sheet(s): {orders}")
+        changed += len(done)
+    try:
+        grabbed.unlink()
+    except OSError:
+        pass
+    return changed
+
+
+def apply_now(action, keys, who, log=print, path=REQUESTS_PATH, ledger_path=LEDGER_PATH):
+    """With the agent off: request + apply to the ledger file at once."""
+    request(action, keys, who, path)
+    ledger = load(ledger_path)
+    changed = apply_requests(ledger, log=log, path=path)
+    if changed:
+        save(ledger, ledger_path)
     return changed
 
 
 def main(argv=None):
     import argparse
     from .lock import agent_running
-    ap = argparse.ArgumentParser(description="Ledger fixes a person asks for.")
+    ap = argparse.ArgumentParser(description="Ledger fixes a person asks for. Safe while the agent runs: "
+                                             "it applies them within about 20 seconds.")
     ap.add_argument("--requeue", nargs="+", metavar="ORDER",
                     help="put these orders' held sheets back in the queue")
+    ap.add_argument("--by-hand", nargs="+", metavar="ORDER",
+                    help="mark these orders' held or queued sheets done by hand (never ripped by the agent)")
     args = ap.parse_args(argv)
-    if args.requeue:
-        if agent_running():
-            raise SystemExit("The agent is running and keeps its own copy of the ledger. "
-                             "Stop it first (RIP Agent window, or Restart agent), then run this.")
-        ledger = load()
-        keys = requeue(ledger, args.requeue)
-        save(ledger)
-        print(f"Re-queued {len(keys)} sheet(s): " + ", ".join(ledger[k]["order"] for k in keys)
-              if keys else "No held sheets for those orders.")
+    if not (args.requeue or args.by_hand):
+        ap.print_help()
+        return
+    action, orders = ("requeue", args.requeue) if args.requeue else ("by_hand", args.by_hand)
+    ledger = load()
+    keys = keys_for_orders(ledger, orders, (HELD,) if action == "requeue" else (HELD, QUEUED))
+    if not keys:
+        print("No " + ("held" if action == "requeue" else "held or queued") + " sheets for those orders.")
+        return
+    names = " ".join(dict.fromkeys(ledger[k]["order"] for k in keys))
+    if agent_running():
+        request(action, keys, who="command line")
+        print(f"Sent to the agent ({len(keys)} sheet(s): {names}); it applies it within about 20 seconds.")
+    else:
+        apply_now(action, keys, who="command line")
 
 
 if __name__ == "__main__":

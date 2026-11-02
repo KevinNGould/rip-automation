@@ -3,6 +3,8 @@ RIP Agent control window. Double-click the desktop shortcut "RIP Agent"
 (made by tools\\make_shortcut.ps1), or run:  pythonw tools\\rip_agent_control.pyw
 
 One big button: Pause / Resume / Start. Needs no admin rights.
+"Held & queued sheets" lists sheets waiting on a person or a run, and marks
+them done by hand or re-queues them (Kevin, 2026-11-02).
 Logic lives in ripauto/control.py.
 """
 
@@ -10,6 +12,7 @@ import sys
 import threading
 import tkinter as tk
 import webbrowser
+from tkinter import messagebox
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -35,7 +38,7 @@ class App:
         self.busy = False
         root.title(f"RIP Agent: {cfg.get('label', cfg['machine_id'])}")
         root.configure(bg=BG)
-        root.geometry("460x400")
+        root.geometry("460x440")
         root.minsize(400, 360)
 
         self.banner = tk.Frame(root, bg=COLORS["wait"][0], padx=18, pady=14)
@@ -75,6 +78,12 @@ class App:
                       activebackground="#2c3038", activeforeground=TEXT, cursor="hand2",
                       command=cmd).pack(side="left", padx=(0, 8), ipadx=8, ipady=3)
 
+        self.sheets_btn = tk.Button(body, text="Held & queued sheets", font=("Segoe UI", 10),
+                                    relief="flat", bg=CARD, fg=TEXT, activebackground="#2c3038",
+                                    activeforeground=TEXT, cursor="hand2", command=self.open_sheets)
+        self.sheets_btn.pack(fill="x", pady=(0, 6), ipady=3)
+        self.sheets_win = None
+
         self.log = tk.Label(body, text="", font=("Consolas", 9), bg=CARD, fg=DIM, anchor="nw",
                             justify="left", padx=8, pady=6)
         self.log.pack(fill="both", expand=True)
@@ -95,7 +104,11 @@ class App:
                 result = ({"kind": "wait", "headline": "?", "detail": f"Couldn't read status: {e}",
                            "button": "Retry", "action": "none"}, False, False)
             lines = control.last_log_lines(4)
-            self.root.after(0, lambda: self.show(result, lines))
+            try:
+                rows = control.sheets_for_a_person()
+            except Exception:
+                rows = []
+            self.root.after(0, lambda: (self.show(result, lines), self.show_sheet_count(rows)))
         threading.Thread(target=work, daemon=True).start()
 
     def show(self, result, lines):
@@ -119,6 +132,19 @@ class App:
         else:
             self.restart_btn.configure(text="Restart agent", state="normal" if running else "disabled")
         self.log.configure(text="\n".join(lines) or "No log yet.")
+
+    def show_sheet_count(self, rows):
+        held = sum(1 for r in rows if r["status"] == "held")
+        text = "Held & queued sheets"
+        if rows:
+            text += f"  ({held} held, {len(rows) - held} queued)"
+        self.sheets_btn.configure(text=text, bg="#8a6d1f" if held else CARD)
+
+    def open_sheets(self):
+        if self.sheets_win is not None and self.sheets_win.win.winfo_exists():
+            self.sheets_win.win.lift()
+            return
+        self.sheets_win = SheetsWindow(self.root, on_change=self.update_once)
 
     # ---- actions ----
     def act(self):
@@ -161,6 +187,107 @@ class App:
         base = control.dashboard_base(self.cfg)
         if base:
             webbrowser.open(f"{base}/#m={self.cfg['machine_id']}")
+
+
+class SheetsWindow:
+    """Held and queued sheets: mark done by hand, or re-queue held ones."""
+
+    def __init__(self, root, on_change):
+        self.on_change = on_change
+        self.rows = []
+        win = self.win = tk.Toplevel(root, bg=BG, padx=14, pady=12)
+        win.title("Held & queued sheets")
+        win.geometry("760x420")
+        win.minsize(560, 300)
+        tk.Label(win, text="Held: the agent stopped on it and won't rip it.   Queued: waiting for its run.\n"
+                           "Click to pick a sheet; Ctrl-click or Shift-click for several.",
+                 font=("Segoe UI", 10), bg=BG, fg=DIM, justify="left", anchor="w").pack(fill="x")
+        frame = tk.Frame(win, bg=BG)
+        frame.pack(fill="both", expand=True, pady=(8, 8))
+        self.list = tk.Listbox(frame, selectmode="extended", font=("Consolas", 10), bg=CARD, fg=TEXT,
+                               selectbackground="#2f6fd0", selectforeground="#ffffff",
+                               highlightthickness=0, relief="flat", activestyle="none")
+        bar = tk.Scrollbar(frame, command=self.list.yview)
+        self.list.configure(yscrollcommand=bar.set)
+        self.list.pack(side="left", fill="both", expand=True)
+        bar.pack(side="right", fill="y")
+        row = tk.Frame(win, bg=BG)
+        row.pack(fill="x")
+        style = dict(font=("Segoe UI", 10, "bold"), relief="flat", cursor="hand2", fg="#ffffff",
+                     activeforeground="#ffffff")
+        tk.Button(row, text="Mark done by hand", bg="#1f7a4d", activebackground="#1f7a4d",
+                  command=self.by_hand, **style).pack(side="left", ipadx=10, ipady=4)
+        tk.Button(row, text="Re-queue", bg="#2f6fd0", activebackground="#2f6fd0",
+                  command=self.requeue, **style).pack(side="left", padx=(8, 0), ipadx=10, ipady=4)
+        tk.Button(row, text="Refresh", font=("Segoe UI", 10), relief="flat", bg=CARD, fg=TEXT,
+                  activebackground="#2c3038", activeforeground=TEXT, cursor="hand2",
+                  command=self.refresh).pack(side="right", ipadx=8, ipady=3)
+        self.note = tk.Label(win, text="", font=("Segoe UI", 9), bg=BG, fg=DIM, anchor="w",
+                             justify="left", wraplength=720)
+        self.note.pack(fill="x", pady=(6, 0))
+        self.tick()
+
+    def tick(self):
+        if self.win.winfo_exists():
+            self.refresh(keep_selection=True)
+            self.win.after(5000, self.tick)
+
+    def refresh(self, keep_selection=False):
+        picked = set(self.selected_keys()) if keep_selection else set()
+        try:
+            self.rows = control.sheets_for_a_person()
+        except Exception as e:
+            self.note.configure(text=f"Couldn't read the ledger: {e}")
+            return
+        top = self.list.yview()[0]
+        self.list.delete(0, "end")
+        for i, r in enumerate(self.rows):
+            length = f"{r['length_in']:.1f} in" if r["length_in"] else "?"
+            self.list.insert("end", f"{r['status']:7} {r['order']:8} {length:>9}  {r['when']:16}  "
+                                    f"{r['reason'][:70]}")
+            self.list.itemconfigure(i, fg="#f0c674" if r["status"] == "held" else TEXT)
+            if r["key"] in picked:
+                self.list.selection_set(i)
+        if not self.rows:
+            self.list.insert("end", "Nothing held or queued.")
+        self.list.yview_moveto(top)
+
+    def selected(self):
+        return [self.rows[i] for i in self.list.curselection() if i < len(self.rows)]
+
+    def selected_keys(self):
+        return [r["key"] for r in self.selected()]
+
+    def by_hand(self):
+        rows = self.selected()
+        if not rows:
+            self.note.configure(text="Pick one or more sheets first.")
+            return
+        orders = " ".join(dict.fromkeys(r["order"] for r in rows))
+        if messagebox.askyesno("Mark done by hand",
+                               f"Mark {len(rows)} sheet(s) as done by hand?\n\n{orders}\n\n"
+                               "The agent will never rip them.", parent=self.win):
+            self.act("by_hand", rows)
+
+    def requeue(self):
+        rows = [r for r in self.selected() if r["status"] == "held"]
+        if not rows:
+            self.note.configure(text="Re-queue is for held sheets: pick one or more held sheets.")
+            return
+        orders = " ".join(dict.fromkeys(r["order"] for r in rows))
+        if messagebox.askyesno("Re-queue",
+                               f"Put {len(rows)} held sheet(s) back in the queue?\n\n{orders}\n\n"
+                               "The agent rips them in its next run. Only do this if they haven't been "
+                               "ripped by hand: once a hand-ripped job is cleared from PO-TRY's queue, "
+                               "the agent can't tell and would rip it again.", parent=self.win):
+            self.act("requeue", rows)
+
+    def act(self, action, rows):
+        ok, msg = control.ledger_action(action, [r["key"] for r in rows])
+        self.note.configure(text=msg)
+        self.list.selection_clear(0, "end")
+        self.refresh()
+        self.on_change()
 
 
 def main():

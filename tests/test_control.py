@@ -90,6 +90,32 @@ class Describe(unittest.TestCase):
             finally:
                 c.RESTART_PATH, c.PAUSE_PATH, c.subprocess.run = saved
 
+    def test_sheets_for_a_person_held_first(self):
+        from ripauto.control import sheets_for_a_person
+        led = {"a": {"order": "#49400", "status": "queued", "length_in": 13.5},
+               "b": {"order": "#48942", "status": "held", "hold_reason": "manual check: x",
+                     "updated_at": "2026-10-27T11:52:21", "length_in": 29.5},
+               "c": {"order": "#48000", "status": "ripped"},
+               "d": {"order": "#47000"}}                                   # untracked
+        rows = sheets_for_a_person(led)
+        self.assertEqual([(r["order"], r["status"]) for r in rows], [("#48942", "held"), ("#49400", "queued")])
+        self.assertEqual(rows[0]["when"], "2026-10-27 11:52")
+
+    def test_ledger_action_goes_to_the_agent_when_it_runs(self):
+        import ripauto.control as c
+        import ripauto.ledger as L
+        sent = []
+        saved = (c.agent_running, L.request)
+        c.agent_running, L.request = (lambda: True), (lambda action, keys, *a, **k: sent.append((action, keys)))
+        try:
+            ok, msg = c.ledger_action("by_hand", ["k1"])
+        finally:
+            c.agent_running, L.request = saved
+        self.assertTrue(ok)
+        self.assertEqual(sent, [("by_hand", ["k1"])])
+        self.assertIn("20 seconds", msg)
+        self.assertFalse(c.ledger_action("by_hand", [])[0])
+
     def test_dashboard_base(self):
         self.assertEqual(dashboard_base({"dashboard_url": "http://osshub.local:8085/api/heartbeat"}),
                          "http://osshub.local:8085")

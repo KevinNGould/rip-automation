@@ -99,5 +99,60 @@ class Requeue(unittest.TestCase):
         self.assertEqual((led["d"]["status"], led["e"]["status"]), (L.RIPPED, L.BY_HAND))
 
 
+class PersonRequests(unittest.TestCase):
+    """Done by hand / re-queue from the RIP Agent window or the command line."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = Path(self.tmp.name) / "ledger_requests.json"
+        self.led = {"h1": rec(48942, status=L.HELD, hold_reason="x"),
+                    "h2": rec(48943, status=L.HELD, hold_reason="x"),
+                    "q1": rec(49400),
+                    "r1": rec(48942, status=L.RIPPED),
+                    "i1": rec(49401, status=L.IN_RUN)}
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_by_hand_takes_held_and_queued_only(self):
+        L.request("by_hand", ["h1", "q1", "r1", "i1", "gone"], path=self.path)
+        logs = []
+        self.assertEqual(L.apply_requests(self.led, NOW, logs.append, self.path), 2)
+        self.assertEqual([L.status(self.led[k]) for k in ("h1", "q1", "r1", "i1")],
+                         [L.BY_HAND, L.BY_HAND, L.RIPPED, L.IN_RUN])
+        self.assertIn("marked done by hand", self.led["h1"]["by_hand"])
+        self.assertEqual(logs, ["RIP Agent window: marked done by hand 2 sheet(s): #48942 #49400"])
+        self.assertFalse(self.path.exists())                      # consumed
+        self.assertEqual(L.apply_requests(self.led, NOW, logs.append, self.path), 0)
+
+    def test_requeue_held_only_and_requests_stack(self):
+        L.request("requeue", ["h1", "q1"], path=self.path)
+        L.request("by_hand", ["h2"], who="command line", path=self.path)
+        self.assertEqual(L.apply_requests(self.led, NOW, lambda line: None, self.path), 2)
+        self.assertEqual((L.status(self.led["h1"]), L.status(self.led["q1"]), L.status(self.led["h2"])),
+                         (L.QUEUED, L.QUEUED, L.BY_HAND))
+        self.assertNotIn("hold_reason", self.led["h1"])
+
+    def test_applying_twice_is_harmless(self):
+        L.request("by_hand", ["h1"], path=self.path)
+        L.request("by_hand", ["h1"], path=self.path)
+        self.assertEqual(L.apply_requests(self.led, NOW, lambda line: None, self.path), 1)
+
+    def test_orders_to_keys(self):
+        self.assertEqual(sorted(L.keys_for_orders(self.led, ["#48942", "48943"], (L.HELD,))), ["h1", "h2"])
+        self.assertEqual(L.keys_for_orders(self.led, ["48942"], (L.HELD, L.QUEUED)), ["h1"])
+
+    def test_apply_now_with_the_agent_off(self):
+        ledger_path = Path(self.tmp.name) / "processed.json"
+        L.save(self.led, ledger_path)
+        self.assertEqual(L.apply_now("by_hand", ["h1", "h2"], "command line", log=lambda line: None,
+                                     path=self.path, ledger_path=ledger_path), 2)
+        self.assertEqual(L.status(L.load(ledger_path)["h2"]), L.BY_HAND)
+
+    def test_unknown_action_refused(self):
+        with self.assertRaises(ValueError):
+            L.request("delete", ["h1"], path=self.path)
+
+
 if __name__ == "__main__":
     unittest.main()
