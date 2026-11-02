@@ -61,6 +61,7 @@ HANDS = HandsOff()            # notices a person using the PC mid-sequence (CRIT
 LOAD_TIMEOUT = 300          # picture load
 PREVIEW_TIMEOUT = 120       # Print preview dialog to appear
 BUTTON_TIMEOUT = 10         # a toolbar button to be findable (redraw after F3)
+UNREADABLE = "preview length unreadable"
 TEMPLATE_TIMEOUT = 10       # the colour template to be readable
 RIP_TIMEOUT = 45 * 60       # a 50 ft sheet took ~9 min; leave plenty of room
 SETTLE = 2.0                # pause after each UI step
@@ -194,7 +195,7 @@ def gate_reason(size, cap_in, planned_in, pictures=1, gap_in=0.0):
     (2026-10-15). So the preview may come out up to (pictures - 1) x gap_in
     shorter than planned and still be fine; tolerance applies on top."""
     if size is None:
-        return "preview length unreadable"
+        return UNREADABLE
     w, l = size
     if l > cap_in or w > cap_in:
         return f"preview shows {l:.1f} in, over {cap_in:g} in"
@@ -208,6 +209,15 @@ def gate_reason(size, cap_in, planned_in, pictures=1, gap_in=0.0):
             return (f"preview shows {l:.1f} in but {planned_in:.1f} in was planned "
                     f"(a picture may have loaded twice)")
     return None
+
+
+def unreadable_goes_ahead(gate, cfg):
+    """(gate, unverified): an unreadable preview label alone doesn't stop the
+    run when rip_when_unreadable is on; the agent checks the RIP queue's exact
+    size after the rip instead. Any other gate reason stands."""
+    if gate == UNREADABLE and cfg.get("rip_when_unreadable", True):
+        return None, True
+    return gate, False
 
 
 def multi_add_chunks(distinct):
@@ -1174,7 +1184,13 @@ def rip_pictures(main, pid, pictures, cfg, planned_in, dry_run,
             wait_loaded(main, meter, None, 0)
         if "preview" in pause_at:
             pause("the Print preview")
-        result = {"job_name": job, "preview": size, "gate": gate, "row": None,
+        # Unreadable label (7 of the first 145 runs, all OCR misreads; Kevin,
+        # 2026-11-02): rip anyway and let the agent check the RIP queue's exact
+        # Size cell afterwards. A reading that disagrees still cancels.
+        gate, unverified = unreadable_goes_ahead(gate, cfg)
+        if unverified:
+            log("  preview label unreadable: ripping anyway; the RIP queue's size is checked after the rip")
+        result = {"job_name": job, "preview": size, "gate": gate, "row": None, "unverified": unverified,
                   "started": started.isoformat(timespec="seconds"), "ended": None}
 
         if dry_run or gate:

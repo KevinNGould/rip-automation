@@ -4,6 +4,21 @@ Newest first. Claude (chat) keeps this file; Claude Code adds entries when it de
 
 ## 2026-11-02
 
+**Changed (Kevin: "build that"): an unreadable preview label no longer holds the run; the RIP queue's exact size checks every rip**
+- **Why:** across the first 145 runs, 7 of the 9 non-human failures were OCR misreads of the preview's length label. None were real size problems, and each one held an order for Kevin. The RIP queue's "Size (inch)" cell is plain UI text ("22.500×31.500"), read with no OCR.
+- **Now:**
+  - If the preview reading is *unreadable* (and only that), the agent presses Print anyway. The run is marked `unverified` and logged "preview label unreadable: ripping anyway".
+  - After **every** rip, `agent.queue_problem()` runs the same `gate_reason` rules (cap, short, doubled) on the queue's size. Before, it only checked "over cap".
+  - Any disagreement holds the sheets: "ripped job …: RIP queue shows N in but M in was planned; don't print it, delete it from the RIP queue". The run outcome is `queue_check` (was `over_cap`).
+  - If the run was unverified *and* the queue size can't be read either: "… check its length before printing".
+  - A verified run whose queue size can't be read carries on as before.
+- **Unchanged:** a preview that *reads* a wrong length still cancels before ripping, and the load retries stay.
+- **Worst case:** one extra ripped job that Kevin deletes from the RIP queue. The agent never prints.
+- **Checked against history:** of the 146 real ripped runs with a queue size, the new check would have flagged none.
+- Switch: `"rip_when_unreadable": false` in machine.json restores cancel-and-hold.
+- The dashboard knows the `queue_check` outcome ("check before printing").
+- Tests: 240 pass.
+
 **Built (Code, Kevin: "an option somewhere to mark these orders done when I need"): done-by-hand / re-queue from the window**
 - **RIP Agent window → "Held & queued sheets"**: the button shows the counts and turns amber when anything is held. It opens a list (held first, in yellow). Multi-select, then **Mark done by hand** (held or queued sheets; the agent never rips them) or **Re-queue** (held only, with a warning that a hand-ripped job already cleared from PO-TRY's queue would be ripped again). Both ask for confirmation.
 - **Command line:** `python -m ripauto.ledger --by-hand 48942 48943` and `--requeue …`. They no longer need the agent stopped.

@@ -61,6 +61,15 @@ class Gate(unittest.TestCase):
         # ...but shorter than the artwork alone by more than the tolerance is not.
         self.assertIn("may not have loaded", gate_reason((22.5, 570.0), 650, 600.0, pictures=20, gap_in=1.0))
 
+    def test_unreadable_alone_goes_ahead_unverified(self):
+        from ripauto.potry import unreadable_goes_ahead
+        self.assertEqual(unreadable_goes_ahead("preview length unreadable", {}), (None, True))
+        self.assertEqual(unreadable_goes_ahead("preview length unreadable", {"rip_when_unreadable": False}),
+                         ("preview length unreadable", False))
+        short = "preview shows 24.0 in but 295.4 in was planned (a picture may not have loaded)"
+        self.assertEqual(unreadable_goes_ahead(short, {}), (short, False))     # a real mismatch still stops
+        self.assertEqual(unreadable_goes_ahead(None, {}), (None, False))
+
     def test_doubled_picture(self):
         self.assertIn("loaded twice", gate_reason((22.5, 73.5), 650, 65.197))
         self.assertIsNone(gate_reason((22.5, 67.5), 650, 65.197))   # within 3 in

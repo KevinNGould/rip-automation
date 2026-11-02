@@ -14,9 +14,9 @@ CFG = {"machine_id": "8color-1", "cap_in": 650, "target_in": 600, "window_in": 4
 
 
 class FakeDriver:
-    def __init__(self, rows=(), gate=None, fail=None, size=None, row_size="22.500×600.000"):
+    def __init__(self, rows=(), gate=None, fail=None, size=None, row_size=None, unverified=False):
         self.rows, self.gate, self.fail, self.size = list(rows), gate, fail, size
-        self.row_size = row_size
+        self.row_size, self.unverified = row_size, unverified
         self.calls = []
 
     def queue_rows(self):
@@ -34,7 +34,9 @@ class FakeDriver:
         if self.fail:
             raise Stop(self.fail)
         return {"job_name": pictures[0].stem, "preview": self.size or (22.5, planned_in),
-                "gate": self.gate, "row": None if dry_run else {"Size (inch)": self.row_size},
+                "gate": self.gate, "unverified": self.unverified,
+                # the RIP queue's Size cell: matches the plan unless a test says otherwise
+                "row": None if dry_run else {"Size (inch)": self.row_size or f"22.500×{planned_in:.3f}"},
                 "started": "s", "ended": "e"}
 
 
@@ -79,11 +81,11 @@ class Env:
                             "status": L.QUEUED, "copies_ripped": 0}
         return name
 
-    def run(self, driver, **kw):
+    def run(self, driver, log=lambda *_: None, **kw):
         saves = []
         summary = cycle(self.cfg, self.ledger, driver, NOW,
                         dl_names_fn=lambda: self.downloads, runs_dir=self.runs,
-                        save=lambda: saves.append(1), log=lambda *_: None, **kw)
+                        save=lambda: saves.append(1), log=log, **kw)
         return summary, saves
 
     def close(self):
@@ -112,7 +114,7 @@ class Cycle(unittest.TestCase):
         self.assertFalse((self.env.queue / a).exists())
         [rec] = [json.loads(p.read_text()) for p in self.env.runs.glob("*.json")]
         self.assertEqual((rec["outcome"], rec["orders"], rec["queue_size"]),
-                         ("ripped", ["#47930", "#47931"], "22.500×600.000"))
+                         ("ripped", ["#47930", "#47931"], "22.500×590.500"))
         self.assertEqual(own_job_names(self.env.runs), [Path(a).stem])
         self.assertTrue(saves)
 
@@ -235,10 +237,45 @@ class Cycle(unittest.TestCase):
         summary, _ = self.env.run(FakeDriver(row_size="22.500×651.200"))
         self.assertEqual(summary["ripped"], [])
         self.assertEqual(L.status(self.env.ledger["a"]), L.HELD)
-        self.assertIn("delete it from the RIP queue by hand", self.env.ledger["a"]["hold_reason"])
+        self.assertIn("over 650 in; don't print it, delete it from the RIP queue",
+                      self.env.ledger["a"]["hold_reason"])
         self.assertEqual(self.env.ledger["a"]["copies_ripped"], 1)     # it was ripped
         [rec] = [json.loads(p.read_text()) for p in self.env.runs.glob("*.json")]
-        self.assertEqual(rec["outcome"], "over_cap")
+        self.assertEqual(rec["outcome"], "queue_check")
+
+    def test_unreadable_preview_ripped_and_confirmed_by_the_queue(self):
+        # Kevin, 2026-11-02: an unreadable label no longer holds the run.
+        self.env.add("a", 47930, 600.0)
+        logs = []
+        summary, _ = self.env.run(FakeDriver(size=None, unverified=True), log=logs.append)
+        self.assertEqual(L.status(self.env.ledger["a"]), L.RIPPED)
+        self.assertTrue(any("RIP queue size 22.500×600.000 matches the plan" in line for line in logs))
+
+    def test_unreadable_preview_and_queue_disagrees_is_held_dont_print(self):
+        self.env.add("a", 47930, 600.0)
+        self.env.run(FakeDriver(size=None, unverified=True, row_size="22.500×300.000"))
+        self.assertEqual(L.status(self.env.ledger["a"]), L.HELD)
+        reason = self.env.ledger["a"]["hold_reason"]
+        self.assertIn("RIP queue shows 300.0 in but 600.0 in was planned", reason)
+        self.assertIn("don't print it", reason)
+
+    def test_unreadable_preview_and_no_queue_size_is_held_to_check(self):
+        self.env.add("a", 47930, 600.0)
+        d = FakeDriver(size=None, unverified=True, row_size="")
+        d.row_size = None
+        orig = d.rip
+        d.rip = lambda *a, **k: dict(orig(*a, **k), row={})          # queue row not found
+        self.env.run(d)
+        self.assertEqual(L.status(self.env.ledger["a"]), L.HELD)
+        self.assertIn("check its length before printing", self.env.ledger["a"]["hold_reason"])
+
+    def test_queue_size_unreadable_on_a_verified_run_is_fine(self):
+        self.env.add("a", 47930, 600.0)
+        d = FakeDriver()
+        orig = d.rip
+        d.rip = lambda *a, **k: dict(orig(*a, **k), row={})
+        self.env.run(d)
+        self.assertEqual(L.status(self.env.ledger["a"]), L.RIPPED)
 
     def test_run_record_measures_gap(self):
         # Kevin's 3-sheet dry run: 45.74 + 7.2 + 10.257 in of artwork, preview 65.237 in.

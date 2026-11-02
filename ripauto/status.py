@@ -152,7 +152,7 @@ def recent_runs(records, limit=MAX_RECENT):
             "pictures": r.get("pictures"),
             "planned_in": r.get("planned_in"),
             "actual_in": r.get("actual_in"),
-            "outcome": str(r.get("outcome", ""))[:12],      # ripped | gate | stopped | over_cap
+            "outcome": str(r.get("outcome", ""))[:12],      # ripped | gate | stopped | queue_check (was over_cap)
         })
     return out
 

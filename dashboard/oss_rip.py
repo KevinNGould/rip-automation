@@ -138,7 +138,7 @@ def order(v):
 
 
 _WHEN = re.compile(r"^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2})?([+-]\d{2}:\d{2}|Z)?)?$")
-OUTCOMES = ("ripped", "gate", "stopped", "over_cap")
+OUTCOMES = ("ripped", "gate", "stopped", "over_cap", "queue_check")
 REASONS = ("full", "flush", "waiting")
 
 
@@ -245,7 +245,7 @@ latest = load_json(CONFIG["state_path"], {})     # machine_id -> {"received": ep
 # Built from cleaned heartbeats only, so it holds the same things the page
 # shows: order numbers, sheet positions, machines, run ids, inches, times.
 # One row per (order, machine, kind, ref); a repeat sighting updates last_seen.
-#   kind  waiting | ripped | gate | stopped | over_cap | by_hand | held
+#   kind  waiting | ripped | gate | stopped | over_cap | queue_check | by_hand | held
 #   ref   sheet position (waiting, by_hand), run id (runs), "" (held)
 
 def db():
@@ -578,7 +578,7 @@ function logTable(hb) {
   (hb.by_hand || []).forEach(b => rows.push({when: b.at, kind: "hand", b}));
   rows.sort((a, b) => String(b.when || "").localeCompare(String(a.when || "")));
   if (!rows.length) return `<div class="empty">Nothing ripped yet.</div>`;
-  const outcome = {ripped:["ok","ripped"], gate:["warn","cancelled at preview"], stopped:["bad","stopped"], over_cap:["bad","over cap"]};
+  const outcome = {ripped:["ok","ripped"], gate:["warn","cancelled at preview"], stopped:["bad","stopped"], over_cap:["bad","over cap"], queue_check:["bad","check before printing"]};
   return `<div class="scroll"><table><tr><th>When</th><th>What</th><th>Orders</th><th class="num">Inches</th></tr>` +
     rows.slice(0, 40).map(x => {
       if (x.kind === "run") {
@@ -730,6 +730,7 @@ function eventLine(e) {
     case "gate": return [e.at || e.first_seen, `<span class="tag warn">cancelled at preview</span> on ${on}, run ${esc(e.ref)}. Held for a person.`];
     case "stopped": return [e.at || e.first_seen, `<span class="tag bad">run stopped</span> on ${on}, run ${esc(e.ref)}. Held for a person.`];
     case "over_cap": return [e.at || e.first_seen, `<span class="tag bad">over cap</span> on ${on}, run ${esc(e.ref)}. Delete from the RIP queue by hand.`];
+    case "queue_check": return [e.at || e.first_seen, `<span class="tag bad">check before printing</span> on ${on}, run ${esc(e.ref)}: its RIP queue size didn't match the plan (or couldn't be read). Held for a person.`];
     case "by_hand": return [e.at || e.first_seen, `<span class="tag">by hand</span> found done by hand on ${on} (sheet ${esc(e.ref)}${inch}).`];
     case "held": return [e.first_seen, `<span class="tag warn">held</span> on ${on}: ${esc(e.detail)}. Last seen held ${dt(e.last_seen)}.`];
   }

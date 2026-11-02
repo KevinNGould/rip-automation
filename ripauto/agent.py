@@ -46,7 +46,7 @@ from .config import STATE_DIR, ConfigError, load_dashboard_key, load_machine, lo
 from .handcheck import BY_HAND, FREE, download_names, hand_check, queue_job_names
 from .lock import AgentLock, agent_running
 from .planner import Limits, plan
-from .potry import RIPPING_STATUSES, parse_size_cell
+from .potry import RIPPING_STATUSES, gate_reason, parse_size_cell
 from .status import NullReporter, Reporter
 from .warning import RIP_NOW_PATH, Gate, Warner
 from .handsoff import HumanInput
@@ -69,6 +69,24 @@ TASK_NAME = "OSS RIP Agent"
 
 class Stop(Exception):
     pass
+
+
+def queue_problem(result, cfg, planned_in, pictures):
+    """After a rip: what's wrong with the job in PO-TRY's RIP queue, or None.
+    Its Size cell is exact text (no OCR), so this is the check that counts
+    when the preview label couldn't be read (result["unverified"])."""
+    size = parse_size_cell((result.get("row") or {}).get("Size (inch)"))
+    job = result.get("job_name") or "?"
+    if size is None:
+        if result.get("unverified"):
+            return (f"ripped job {job}: neither the preview nor the RIP queue size could be read; "
+                    f"check its length before printing")
+        return None
+    reason = gate_reason(size, cfg["cap_in"], planned_in, pictures, cfg.get("gap_in", 0))
+    if reason:
+        return (f"ripped job {job}: {reason.replace('preview shows', 'RIP queue shows')}; "
+                f"don't print it, delete it from the RIP queue")
+    return None
 
 
 def potry_is_running():
@@ -344,18 +362,20 @@ def cycle(cfg, ledger, driver, now, *, dl_names_fn, runs_dir=RUNS_DIR, save=lamb
             break
         L.finish_run(ledger, run_id, run.items, now)
         move_ripped(ledger, run, run_id, cfg["queue_dir"])
-        queue_size = parse_size_cell((result.get("row") or {}).get("Size (inch)"))
-        if queue_size and queue_size[1] > cfg["cap_in"]:
-            # Backstop: the preview gate passed but the ripped job is too long.
-            # The agent never touches the queue toolbar; a person deletes it.
-            problem = (f"ripped job {result['job_name']} is {queue_size[1]:.1f} in, over "
-                       f"{cfg['cap_in']:g} in: delete it from the RIP queue by hand, don't print it")
+        problem = queue_problem(result, cfg, run.planned_in, len(pictures))
+        if problem:
+            # Backstop: the ripped job's exact size disagrees with the plan (or,
+            # after an unreadable preview, can't be confirmed). The agent never
+            # touches the queue toolbar; a person checks it, and deletes it if wrong.
             L.hold(ledger, keys, problem, now)
-            write_record(runs_dir, record_for(run_id, cfg, run, pictures, result, "over_cap", False))
+            write_record(runs_dir, record_for(run_id, cfg, run, pictures, result, "queue_check", False))
             save()
             stopped(problem)
             log(f"Run {run_id}: {problem}")
             break
+        if result.get("unverified"):
+            log(f"  preview was unreadable; RIP queue size {(result.get('row') or {}).get('Size (inch)')} "
+                f"matches the plan")
         write_record(runs_dir, record_for(run_id, cfg, run, pictures, result, "ripped", False))
         save()
         summary["ripped"].append(run_id)
