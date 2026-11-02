@@ -4,7 +4,13 @@ Claude Code rewrites this file at the end of every working session and pushes it
 
 **Last updated:** 2026-10-15 ~14:30 (printer PC clock) · **HEAD:** see `git log -1`
 
-## Latest (11-02 13:05): review fixes + "done by hand" control LIVE; nothing held
+## Latest (11-02 13:17): unreadable preview → rip + RIP-queue size check, LIVE
+
+- Per Kevin: an unreadable preview label no longer holds the run. The agent rips and then checks the RIP queue's exact Size cell. Every rip now gets the full size check, not just over-cap. Details: DECISIONS.md, 11-02 top entry.
+- Agent restarted 13:17 (pause off). Pi dashboard redeployed 13:16 (backup `~/oss_rip.py.bak-20261102`) with the `queue_check` outcome ("check before printing").
+- Watch for: a log line "preview label unreadable: ripping anyway", followed by "RIP queue size … matches the plan" or a hold saying "don't print it".
+
+## Earlier (11-02 13:05): review fixes + "done by hand" control LIVE; nothing held
 
 - 12:40: the seven log-review fixes went live (DECISIONS.md, 11-02).
 - 13:04: restarted onto the new "Held & queued sheets" control (window + `ledger --by-hand/--requeue`, applied by the running agent). Pause stays off.
