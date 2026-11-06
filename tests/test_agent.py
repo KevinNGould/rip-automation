@@ -6,7 +6,7 @@ from pathlib import Path
 
 from ripauto import ledger as L
 from ripauto.agent import Stop, cycle, own_job_names
-from ripauto.handsoff import HumanInput
+from ripauto.handsoff import FrontWindow, HumanInput
 
 NOW = datetime(2026, 10, 15, 12, 0, 0)
 CFG = {"machine_id": "8color-1", "cap_in": 650, "target_in": 600, "window_in": 48,
@@ -28,6 +28,10 @@ class FakeDriver:
         if getattr(self, "interrupt", 0) > 0:
             self.interrupt -= 1
             raise HumanInput("the mouse moved (before clicking RIP)")
+        if getattr(self, "blocked", 0) > 0:
+            self.blocked -= 1
+            raise FrontWindow("Epson.exe is in front of PO-TRY and won't go behind it "
+                              "(before starting the run)", program="Epson.exe")
         if on_progress and not dry_run:
             for pct in (41, 87, 100):
                 on_progress(pct)
@@ -333,6 +337,18 @@ class Cycle(unittest.TestCase):
         d.rows = [{"Job name": "47000-x-(1)", "Status": "Transmission finished", "Processing": "100"}]
         summary, _ = self.env.run(d)
         self.assertEqual(len(summary["ripped"]), 1)
+
+    def test_program_in_front_leaves_sheets_queued_not_held(self):
+        # 2026-11-05/06: 16 h of "another window came to the front".
+        self.env.add("a", 47930, 600.0)
+        d = FakeDriver()
+        d.blocked = 1
+        summary, _ = self.env.run(d)
+        self.assertEqual(summary["waiting"], "a program is in front of PO-TRY")
+        self.assertEqual(summary["blocked_by"], "Epson.exe")
+        self.assertEqual(L.status(self.env.ledger["a"]), L.QUEUED)
+        [rec] = [json.loads(p.read_text()) for p in self.env.runs.glob("*.json")]
+        self.assertEqual(rec["outcome"], "blocked")
 
     def test_person_interrupting_leaves_sheets_queued(self):
         self.env.add("a", 47930, 300.0)

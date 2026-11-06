@@ -201,6 +201,19 @@ class Loop(unittest.TestCase):
         self.assertEqual(len(alive), 2)
         self.assertEqual(alive[0], "Still running: 0 queued, 0 held.")
 
+    def test_program_in_front_backs_off_and_flags_after_three(self):
+        self.add("a", 47950, 600.0)
+        d = FakeDriver()
+        d.blocked = 99
+        rep, _ = self.loop(d, max_sleeps=900)                # long enough for 3 x 5 min + 15 min tries
+        said = [line for line in self.logs if "times in a row" in line and "Epson.exe" in line]
+        self.assertEqual(len(said), 1)
+        errors = [c for c in rep.calls if c.get("state") == "error"]
+        self.assertEqual(len(errors), 1)
+        self.assertIn("Epson.exe is in front of PO-TRY", errors[0]["last_error"])
+        self.assertEqual(L.status(self.ledger["a"]), L.QUEUED)
+        self.assertTrue(any("Trying again in 15 min." in line for line in self.logs))
+
     def test_interrupted_run_retries_after_5_min_with_a_note(self):
         self.add("a", 47950, 600.0)
         d = FakeDriver()

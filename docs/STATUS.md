@@ -4,7 +4,17 @@ Claude Code rewrites this file at the end of every working session and pushes it
 
 **Last updated:** 2026-10-15 ~14:30 (printer PC clock) · **HEAD:** see `git log -1`
 
-## Latest (11-02 13:17): unreadable preview → rip + RIP-queue size check, LIVE
+## Latest (11-06 08:50): 16 h stuck on "another window came to the front": fixed (DECISIONS.md, 11-06)
+
+- From 11-05 16:39 nothing ripped: ~120 tries, each leaving an empty job tab. Kevin paused at 08:28 and restarted PO-TRY at 08:34.
+- Fixed: PO-TRY is brought back to the front when a program (not a person) is in its way. The check happens before New. The log names the program. Retries back off to 15 min with a dashboard error.
+- Fixed: a ledger save clash with the RIP Agent window, which wrongly held 4 sheets at 00:40.
+- **Agent restarted onto this, still PAUSED.** Waiting on Kevin:
+  - #49699 #49707 #49721 #49726: held but never ripped by the agent. Re-queue unless ripped by hand.
+  - #49733 (×2) #49736: queued; they rip when Kevin resumes.
+- Open: which program held the front overnight. The next occurrence will be named in the log.
+
+## Earlier (11-02 13:17): unreadable preview → rip + RIP-queue size check, LIVE
 
 - Per Kevin: an unreadable preview label no longer holds the run. The agent rips and then checks the RIP queue's exact Size cell. Every rip now gets the full size check, not just over-cap. Details: DECISIONS.md, 11-02 top entry.
 - Agent restarted 13:17 (pause off). Pi dashboard redeployed 13:16 (backup `~/oss_rip.py.bak-20261102`) with the `queue_check` outcome ("check before printing").

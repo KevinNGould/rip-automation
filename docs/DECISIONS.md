@@ -2,6 +2,22 @@
 
 Newest first. Claude (chat) keeps this file; Claude Code adds entries when it decides something during the build. Build progress and next steps are in `docs/STATUS.md`.
 
+## 2026-11-06
+
+**Fixed (Code): a program in front of PO-TRY stopped every run for 16 h; a save clash held 4 sheets**
+- **11-05 16:39 → 11-06 08:28:** every run stopped with "another window came to the front" (~120 tries, 5 min apart). Nothing was ripped. Each try pressed **New** before the failing click, so job tabs Job29…Job151 piled up.
+  - That check only runs after the mouse/keyboard/pointer checks pass, so it was always a program, never a person. Which program isn't known: the old message didn't say.
+- **Now (`handsoff.py`):**
+  - When another program is in front and nobody has touched the PC, the guard brings PO-TRY back to the front: biggest PO-TRY window, `AttachThreadInput` + `SetForegroundWindow`, up to 3 tries. That's what a click on its taskbar button does, and it clicks or types nothing.
+  - On success it logs "<program> '<title>' was in front; PO-TRY brought back to the front". Otherwise it raises `FrontWindow` (a `HumanInput` subclass) naming the program.
+  - Mouse, keyboard or pointer movement still counts as a person, as before.
+- **Before New (`potry.rip_pictures`):** the front check now runs before any tab is closed or opened. A blocked run leaves PO-TRY exactly as it was: no stray tabs.
+- **Agent:** a `FrontWindow` run records outcome `blocked`, and its sheets stay queued (not held). Retries: 5 min, then 15 min after 3 in a row. At 3 it also logs once and puts a dashboard error "<program> is in front of PO-TRY … close or minimise it"; that clears when PO-TRY can come forward.
+- **00:40:31 `PermissionError … processed.tmp -> processed.json`:**
+  - The RIP Agent window (new on 11-02) reads processed.json every few seconds, and Windows refuses to replace a file another program has open. The save that marks a run's sheets "in run" failed, so the next cycle found them "left mid-run" and held #49699 #49707 #49721 #49726. None of them were ever loaded or ripped.
+  - `ledger.save` now retries for up to 2 s. The test reproduces the exact `WinError 5` with the retry off.
+- Tests: 246 pass. `bring_to_front` hasn't been exercised live yet: Kevin was at the PC, and it would move his windows.
+
 ## 2026-11-02
 
 **Changed (Kevin: "build that"): an unreadable preview label no longer holds the run; the RIP queue's exact size checks every rip**

@@ -120,6 +120,9 @@ def log(msg):
         f.write(line + "\n")
 
 
+HANDS.log = lambda message: log(message)       # "… was in front; PO-TRY brought back"
+
+
 def wait_for(fn, timeout, what, interval=0.5):
     end = time.time() + timeout
     while time.time() < end:
@@ -1099,6 +1102,16 @@ def rip_pictures(main, pid, pictures, cfg, planned_in, dry_run,
     log(f"=== run of {len(pictures)} picture(s), planned {planned_in:.1f} in, job {job}"
         f"{'   (DRY RUN)' if dry_run else ''}")
     show_layout(main)
+    if not pause_at:
+        # PO-TRY must be in front before anything else, above all before New:
+        # 2026-11-05/06 a program stayed in front for 16 h and every try left
+        # a new, empty job tab behind (Job29..Job151). FrontWindow from here
+        # leaves PO-TRY untouched.
+        HANDS.arm(pid)
+        try:
+            HANDS.check("before starting the run", need_front=True)
+        finally:
+            HANDS.disarm()
     # Job tabs the agent opened on earlier runs (CRITIQUE A4). The last run's
     # tab stays open until now, so a person can look at its layout.
     close_agent_tabs(main, pid)

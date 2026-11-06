@@ -153,6 +153,33 @@ class Template(unittest.TestCase):
         self.assertIn("Color correction mode", r["gate"])              # the later read, not "couldn't read"
 
 
+class FrontCheckBeforeNew(unittest.TestCase):
+    def test_program_in_front_stops_the_run_before_new(self):
+        # 2026-11-05/06: every blocked try still pressed New and left a tab (Job29..Job151).
+        import ripauto.potry as p
+        from ripauto.handsoff import FrontWindow, HandsOff
+        calls = []
+        guard = HandsOff(last_input_ms=lambda: 0, tick_ms=lambda: 10_000, cursor=lambda: (1, 1),
+                         foreground_pid=lambda: 7, refocus=lambda pid: False,
+                         who_is_in_front=lambda: ("Epson.exe", ""))
+        saved = {n: getattr(p, n) for n in ("HANDS", "show_layout", "close_agent_tabs", "new_job", "LOG_PATH")}
+        p.HANDS = guard
+        p.show_layout = lambda main: None
+        p.close_agent_tabs = lambda main, pid, keep=(): calls.append("close")
+        p.new_job = lambda main: calls.append("new") or "Job1"
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        p.LOG_PATH = Path(tmp.name) / "agent.log"
+        try:
+            with self.assertRaisesRegex(FrontWindow, "Epson.exe"):
+                p.rip_pictures(None, 42, [Path("a.png")], {"cap_in": 650}, 10.0, dry_run=False)
+        finally:
+            for n, f in saved.items():
+                setattr(p, n, f)
+        self.assertEqual(calls, [])                                     # no tab closed, no New
+        self.assertFalse(guard.armed)
+
+
 class AgentTabs(unittest.TestCase):
     def setUp(self):
         import ripauto.potry as p

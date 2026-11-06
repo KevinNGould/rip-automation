@@ -99,6 +99,21 @@ class Requeue(unittest.TestCase):
         self.assertEqual((led["d"]["status"], led["e"]["status"]), (L.RIPPED, L.BY_HAND))
 
 
+class SaveWhileSomeoneReads(unittest.TestCase):
+    def test_save_waits_for_a_reader_to_let_go(self):
+        # 2026-11-06 00:40: the RIP Agent window had processed.json open; the
+        # agent's save failed and 4 sheets ended up held.
+        import threading
+        import time as t
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "processed.json"
+            L.save({"a": rec(1)}, path)
+            reader = open(path, encoding="utf-8")                 # like the window, mid-read
+            threading.Thread(target=lambda: (t.sleep(0.3), reader.close())).start()
+            L.save({"a": rec(1), "b": rec(2)}, path)
+            self.assertEqual(sorted(L.load(path)), ["a", "b"])
+
+
 class PersonRequests(unittest.TestCase):
     """Done by hand / re-queue from the RIP Agent window or the command line."""
 

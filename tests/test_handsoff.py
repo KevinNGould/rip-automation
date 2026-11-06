@@ -1,6 +1,6 @@
 import unittest
 
-from ripauto.handsoff import HandsOff, HumanInput, ms_after
+from ripauto.handsoff import FrontWindow, HandsOff, HumanInput, ms_after
 
 
 class FakePC:
@@ -11,7 +11,8 @@ class FakePC:
 
     def guard(self):
         return HandsOff(last_input_ms=lambda: self.last_input, tick_ms=lambda: self.t,
-                        cursor=lambda: self.pos, foreground_pid=lambda: self.fg)
+                        cursor=lambda: self.pos, foreground_pid=lambda: self.fg,
+                        refocus=lambda pid: False, who_is_in_front=lambda: ("Epson.exe", "Epson ..."))
 
     def our_click(self, g, pos):
         """The agent clicks: input happens now, pointer moves, then mark()."""
@@ -49,8 +50,31 @@ class Guard(unittest.TestCase):
     def test_another_window_in_front_trips_it_before_a_click(self):
         self.pc.fg = 7
         self.g.check("waiting for load")                 # not a click: fine
-        with self.assertRaisesRegex(HumanInput, "another window"):
+        with self.assertRaisesRegex(FrontWindow, "Epson.exe is in front of PO-TRY"):
             self.g.check("Print", need_front=True)
+
+    def test_a_window_in_front_is_moved_behind_po_try_when_it_can_be(self):
+        # 2026-11-05/06: a program held the front for 16 h with nobody at the PC.
+        logs = []
+        g = HandsOff(last_input_ms=lambda: self.pc.last_input, tick_ms=lambda: self.pc.t,
+                     cursor=lambda: self.pc.pos, foreground_pid=lambda: self.pc.fg,
+                     refocus=lambda pid: setattr(self.pc, "fg", pid) or True,
+                     who_is_in_front=lambda: ("Notepad.exe", "agent.log - Notepad"))
+        g.log = logs.append
+        g.arm(pid=42)
+        self.pc.fg = 7
+        g.check("before clicking Add", need_front=True)  # no raise
+        self.assertEqual(self.pc.fg, 42)
+        self.assertEqual(g.brought_back, ("Notepad.exe", "agent.log - Notepad"))
+        self.assertIn("Notepad.exe", logs[0])
+
+    def test_a_person_switching_windows_still_counts_as_a_person(self):
+        # Switching windows takes a click or a key: the input check catches it first.
+        self.pc.t += 2000
+        self.pc.last_input, self.pc.fg = self.pc.t, 7
+        with self.assertRaises(HumanInput) as caught:
+            self.g.check("Print", need_front=True)
+        self.assertNotIsInstance(caught.exception, FrontWindow)
 
     def test_disarmed_never_trips(self):
         self.g.disarm()

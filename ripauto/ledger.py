@@ -18,6 +18,7 @@ only file access.
 """
 
 import json
+import time
 from datetime import datetime
 
 from .config import STATE_DIR
@@ -34,11 +35,21 @@ def load(path=LEDGER_PATH):
     return {}
 
 
-def save(ledger, path=LEDGER_PATH):
+def save(ledger, path=LEDGER_PATH, tries=40, wait_s=0.05):
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(ledger, indent=2), encoding="utf-8")
-    tmp.replace(path)
+    # Windows refuses the replace while another program has the file open.
+    # The RIP Agent window reads it every few seconds; one clash at the start
+    # of a run (2026-11-06 00:40) left 4 sheets "in run" and so held.
+    for attempt in range(tries):
+        try:
+            tmp.replace(path)
+            return
+        except PermissionError:
+            if attempt == tries - 1:
+                raise
+            time.sleep(wait_s)
 
 
 def _stamp(now):

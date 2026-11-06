@@ -49,7 +49,7 @@ from .planner import Limits, plan
 from .potry import RIPPING_STATUSES, gate_reason, parse_size_cell
 from .status import NullReporter, Reporter
 from .warning import RIP_NOW_PATH, Gate, Warner
-from .handsoff import HumanInput
+from .handsoff import FrontWindow, HumanInput
 
 RUNS_DIR = STATE_DIR / "runs"
 PAUSE_PATH = STATE_DIR / "PAUSE"
@@ -61,6 +61,9 @@ BUSY = "PO-TRY is busy ripping"
 UNREADABLE = "can't read PO-TRY's queue or Downloads"
 UNREADABLE_ERROR_AFTER = 3
 INTERRUPTED = "interrupted by someone using the PC"
+BLOCKED = "a program is in front of PO-TRY"
+BLOCKED_ERROR_AFTER = 3           # in a row: flag it on the dashboard and slow the retries
+RETRY_WHEN_BLOCKED_S = 900
 RETRY_AFTER_INTERRUPT_S = 300
 ALIVE_EVERY_S = 3600          # "Still running" line in the log
 RESTART_PATH = STATE_DIR / "RESTART"     # RIP Agent window "Restart agent" (picks up new code)
@@ -335,6 +338,17 @@ def cycle(cfg, ledger, driver, now, *, dl_names_fn, runs_dir=RUNS_DIR, save=lamb
         try:
             on_start()                      # close the corner warning before taking the mouse
             result = driver.rip(pictures, run.planned_in, dry_run=False, on_progress=progress)
+        except FrontWindow as e:
+            # A program (not a person) stays in front of PO-TRY. Caught before
+            # New, so PO-TRY was left as it was; the sheets stay queued.
+            L.unstart_run(ledger, keys, now)
+            write_record(runs_dir, dict(record_for(run_id, cfg, run, pictures, None, "blocked", False),
+                                        note=str(e)))
+            save()
+            summary["blocked_by"] = e.program
+            log(f"Run {run_id} didn't start: {e}. Sheets stay queued; trying again later.")
+            reporter.update(state="idle", current_run=None)
+            return done(BLOCKED)
         except HumanInput as e:
             # A person used the PC before Print (CRITIQUE A1). The driver backed
             # out; nothing is wrong with these sheets, so they stay queued.
@@ -491,6 +505,7 @@ def run_loop(cfg, ledger, driver, *, fetcher, dl_names_fn, reporter, save, log,
     paused = False
     last_wait = None
     unreadable = 0
+    blocked = 0                                          # runs in a row stopped by a window in front
     potry_running = potry_running or potry_is_running
     error_kind, error_count, error_last = None, 0, ""   # one line per spell of the same error
     error_step = None                                    # "fetch" or "cycle": the spell ends when it works
@@ -582,8 +597,26 @@ def run_loop(cfg, ledger, driver, *, fetcher, dl_names_fn, reporter, save, log,
             elif summary["waiting"] == INTERRUPTED:
                 gate.retry_later(RETRY_AFTER_INTERRUPT_S,
                                  "Rip interrupted: someone used the mouse or keyboard. Trying again.")
+            elif summary["waiting"] == BLOCKED:
+                blocked += 1
+                program = summary.get("blocked_by") or "another program"
+                if blocked == BLOCKED_ERROR_AFTER:
+                    log(f"{program} has kept PO-TRY from coming to the front {blocked} times in a row. "
+                        f"Trying every {RETRY_WHEN_BLOCKED_S // 60} min until it can; "
+                        f"close or minimise {program} to let it carry on.")
+                    reporter.update(state="error", current_run=None,
+                                    last_error=f"{program} is in front of PO-TRY and won't go behind it; "
+                                               f"close or minimise it")
+                gate.retry_later(RETRY_WHEN_BLOCKED_S if blocked >= BLOCKED_ERROR_AFTER
+                                 else RETRY_AFTER_INTERRUPT_S,
+                                 f"{program} is in front of PO-TRY. Trying again.")
             elif summary["waiting"] not in (COUNTDOWN, UNREADABLE):
                 gate.reset()                       # run went, or isn't ready any more
+            if summary["waiting"] not in (BLOCKED, COUNTDOWN):
+                if blocked >= BLOCKED_ERROR_AFTER:
+                    log("PO-TRY can come to the front again.")
+                    reporter.update(last_error=None)
+                blocked = 0
             # An interrupted run drops the Rip now too: a person stepped in, so the
             # retry gets the full warning (2026-10-19: one press outlived two
             # interruptions, a Pause and a restart).
