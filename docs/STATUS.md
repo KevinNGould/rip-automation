@@ -4,7 +4,13 @@ Claude Code rewrites this file at the end of every working session and pushes it
 
 **Last updated:** 2026-10-15 ~14:30 (printer PC clock) · **HEAD:** see `git log -1`
 
-## Latest (11-06 08:50): 16 h stuck on "another window came to the front": fixed (DECISIONS.md, 11-06)
+## Latest (11-06 08:47): back to normal; the backlog ripped in one run
+
+- 08:40: the 4 held sheets were re-queued via `ledger --requeue` (the running agent applied it), and the agent was resumed.
+- 08:42–08:47: one run of all 7 sheets (#49699 #49707 #49721 #49726 #49733 ×2 #49736): planned 384.7, preview 384.687, queue 384.687, tab closed. Nothing is held or queued.
+- PO-TRY was in front the whole time, so this run didn't need the new bring-to-front path. That path is still unproven live.
+
+## Earlier (11-06 08:50): 16 h stuck on "another window came to the front": fixed (DECISIONS.md, 11-06)
 
 - From 11-05 16:39 nothing ripped: ~120 tries, each leaving an empty job tab. Kevin paused at 08:28 and restarted PO-TRY at 08:34.
 - Fixed: PO-TRY is brought back to the front when a program (not a person) is in its way. The check happens before New. The log names the program. Retries back off to 15 min with a dashboard error.
